@@ -22,7 +22,7 @@ while true; do
         echo "Passwords do not match. Try again."
         continue
     fi
-    if ! echo "$SYSADMIN_PASS" | grep -qE "^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^a-zA-Z0-9]).{10,}$"; then
+    if ! [[ "$SYSADMIN_PASS" =~ [a-z] && "$SYSADMIN_PASS" =~ [A-Z] && "$SYSADMIN_PASS" =~ [0-9] && "$SYSADMIN_PASS" =~ [^a-zA-Z0-9] && ${#SYSADMIN_PASS} -ge 10 ]]; then
         echo "Password does not meet complexity requirements. It must have at least 10 characters, including uppercase, lowercase, a number, and a special character."
         continue
     fi
