@@ -81,6 +81,7 @@ systemctl restart sshd
 
 # Set up firewall
 echo "Configuring UFW firewall..."
+ufw --force reset
 ufw default deny incoming
 ufw default allow outgoing
 for ip in "${ALLOWED_IPS[@]}"; do
