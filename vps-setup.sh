@@ -2,7 +2,13 @@
 
 # Prompt for user input
 read -p "Enter your preferred username: " SYSADMIN_USER
-read -p "Enter allowed IP to be whitelisted for SSH access: " ALLOWED_IP
+ALLOWED_IPS=()
+while true; do
+    read -p "Enter an allowed IP for SSH access (or leave blank to finish): " ip
+    [[ -z "$ip" ]] && break
+    ALLOWED_IPS+=("$ip")
+done
+
 read -p "Enter GitHub username for SSH key retrieval: " GITHUB_USERNAME
 
 # Prompt for a secure password
@@ -64,7 +70,9 @@ systemctl restart sshd
 echo "Configuring UFW firewall..."
 ufw default deny incoming
 ufw default allow outgoing
-ufw allow from $ALLOWED_IP to any port $SSH_PORT proto tcp
+for ip in "${ALLOWED_IPS[@]}"; do
+    ufw allow from $ip to any port $SSH_PORT proto tcp
+done
 ufw enable
 
 # Set password complexity rules
