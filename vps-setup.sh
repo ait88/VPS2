@@ -4,6 +4,25 @@
 read -p "Enter your preffered username: " SYSADMIN_USER
 read -p "Enter allowed IP to be whitelisted for SSH access: " ALLOWED_IP
 read -p "Enter GitHub username for SSH key retrieval: " GITHUB_USERNAME
+
+# Prompt for a secure password
+echo "Enter a password for $SYSADMIN_USER (must meet complexity requirements):"
+while true; do
+    read -s -p "Password: " SYSADMIN_PASS
+    echo
+    read -s -p "Confirm Password: " SYSADMIN_PASS_CONFIRM
+    echo
+    if [[ "$SYSADMIN_PASS" != "$SYSADMIN_PASS_CONFIRM" ]]; then
+        echo "Passwords do not match. Try again."
+        continue
+    fi
+    if ! echo "$SYSADMIN_PASS" | grep -qE "^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^a-zA-Z0-9]).{12,}$"; then
+        echo "Password does not meet complexity requirements. It must have at least 12 characters, including uppercase, lowercase, a number, and a special character."
+        continue
+    fi
+    break
+done
+
 SSH_PORT=22
 
 # Ensure script is run as root
@@ -19,7 +38,8 @@ apt update && apt upgrade -y
 # Create sysadmin user if it doesn't exist
 if ! id "$SYSADMIN_USER" &>/dev/null; then
     echo "Creating user $SYSADMIN_USER..."
-    adduser --disabled-password --gecos "" $SYSADMIN_USER
+    adduser --gecos "" --disabled-password $SYSADMIN_USER
+    echo "$SYSADMIN_USER:$SYSADMIN_PASS" | chpasswd
     usermod -aG sudo $SYSADMIN_USER
 fi
 
