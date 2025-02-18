@@ -86,7 +86,7 @@ ufw default allow outgoing
 for ip in "${ALLOWED_IPS[@]}"; do
     ufw allow from $ip to any port $SSH_PORT proto tcp
 done
-ufw enable
+ufw enable && ufw reload
 
 # Fetch and apply custom Bash profile from GitHub
 echo "Fetching custom Bash profile..."
