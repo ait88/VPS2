@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Prompt for user input
-read -p "Enter your preffered username: " SYSADMIN_USER
+read -p "Enter your preferred username: " SYSADMIN_USER
 read -p "Enter allowed IP to be whitelisted for SSH access: " ALLOWED_IP
 read -p "Enter GitHub username for SSH key retrieval: " GITHUB_USERNAME
 
@@ -16,8 +16,8 @@ while true; do
         echo "Passwords do not match. Try again."
         continue
     fi
-    if ! echo "$SYSADMIN_PASS" | grep -qE "^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^a-zA-Z0-9]).{12,}$"; then
-        echo "Password does not meet complexity requirements. It must have at least 12 characters, including uppercase, lowercase, a number, and a special character."
+    if ! echo "$SYSADMIN_PASS" | grep -qE "^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^a-zA-Z0-9]).{10,}$"; then
+        echo "Password does not meet complexity requirements. It must have at least 10 characters, including uppercase, lowercase, a number, and a special character."
         continue
     fi
     break
@@ -71,7 +71,7 @@ ufw enable
 echo "Setting password complexity requirements..."
 apt install libpam-pwquality -y
 cat <<EOL > /etc/security/pwquality.conf
-minlen = 12
+minlen = 10
 minclass = 4
 lcredit = -1
 ucredit = -1
@@ -80,9 +80,11 @@ ocredit = -1
 dictcheck = 0
 EOL
 
-# Set custom Bash prompt for sysadmin
-echo "Customizing Bash prompt..."
-echo 'export PS1="\[\033[01;32m\]\u@\h:\w\$ \[\033[00m\]"' >> /home/$SYSADMIN_USER/.bashrc
+# Fetch and apply custom Bash profile from GitHub
+echo "Fetching custom Bash profile..."
+curl -sL https://raw.githubusercontent.com/$GITHUB_USERNAME/YOUR_REPO/main/.bashrc -o /home/$SYSADMIN_USER/.bashrc
+chown $SYSADMIN_USER:$SYSADMIN_USER /home/$SYSADMIN_USER/.bashrc
+chmod 644 /home/$SYSADMIN_USER/.bashrc
 
 # Enable fail2ban
 echo "Installing and enabling Fail2Ban..."
