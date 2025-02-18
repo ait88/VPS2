@@ -41,6 +41,19 @@ fi
 echo "Updating system..."
 apt update && apt upgrade -y
 
+# Set password complexity rules
+echo "Setting password complexity requirements..."
+apt install libpam-pwquality -y
+cat <<EOL > /etc/security/pwquality.conf
+minlen = 10
+minclass = 4
+lcredit = -1
+ucredit = -1
+dcredit = -1
+ocredit = -1
+dictcheck = 0
+EOL
+
 # Create sysadmin user if it doesn't exist
 if ! id "$SYSADMIN_USER" &>/dev/null; then
     echo "Creating user $SYSADMIN_USER..."
@@ -74,19 +87,6 @@ for ip in "${ALLOWED_IPS[@]}"; do
     ufw allow from $ip to any port $SSH_PORT proto tcp
 done
 ufw enable
-
-# Set password complexity rules
-echo "Setting password complexity requirements..."
-apt install libpam-pwquality -y
-cat <<EOL > /etc/security/pwquality.conf
-minlen = 10
-minclass = 4
-lcredit = -1
-ucredit = -1
-dcredit = -1
-ocredit = -1
-dictcheck = 0
-EOL
 
 # Fetch and apply custom Bash profile from GitHub
 echo "Fetching custom Bash profile..."
