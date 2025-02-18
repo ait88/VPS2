@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Prompt for user input
-read -p "Enter sysadmin username: " SYSADMIN_USER
-read -p "Enter allowed IP for SSH access: " ALLOWED_IP
+read -p "Enter your preffered username: " SYSADMIN_USER
+read -p "Enter allowed IP to be whitelisted for SSH access: " ALLOWED_IP
 read -p "Enter GitHub username for SSH key retrieval: " GITHUB_USERNAME
 SSH_PORT=22
 
