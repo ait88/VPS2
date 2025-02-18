@@ -65,7 +65,7 @@ if [ "$color_prompt" = yes ]; then
         info_color='\[\033[1;31m\]'
         prompt_symbol=💀
     fi
-    PS1="${prompt_color}┌──${debian_chroot:+($debian_chroot)──}(${info_color}\u${prompt_symbol}\h${prompt_color})-[\[\033[0;1m\]\w${prompt_color}]\n${prompt>
+    PS1="${prompt_color}┌──${debian_chroot:+($debian_chroot)──}(${info_color}\u${prompt_symbol}\h${prompt_color})-[\[\033[0;1m\]\w${prompt_color}]\n${prompt_color}└─${info_color}\\$ \[\033[0m\] "
 fi
 
 unset color_prompt force_color_prompt
