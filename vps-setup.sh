@@ -62,6 +62,9 @@ if ! id "$SYSADMIN_USER" &>/dev/null; then
     usermod -aG sudo $SYSADMIN_USER
 fi
 
+# Install btop
+apt update && apt install -y btop
+
 # Allow SSH access
 mkdir -p /home/$SYSADMIN_USER/.ssh
 chmod 700 /home/$SYSADMIN_USER/.ssh
