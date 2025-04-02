@@ -128,4 +128,10 @@ if ! shopt -oq posix; then
     . /etc/bash_completion
   fi
 fi
-btop
+
+# Check if a reboot is required
+if [ -f /var/run/reboot-required ]; then
+  echo -e "\033[1;31m🔁 Reboot is required!\033[0m"
+else
+  echo -e "\033[1;32m✅ No reboot needed\033[0m"
+fi
