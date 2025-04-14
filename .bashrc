@@ -135,3 +135,19 @@ if [ -f /var/run/reboot-required ]; then
 else
   echo -e "\033[1;32m✅ No reboot needed\033[0m"
 fi
+
+# Auto-update .bashrc from GitHub
+GITHUB_BASHRC_URL="https://raw.githubusercontent.com/ait88/VPS/main/.bashrc"
+LOCAL_BASHRC="$HOME/.bashrc"
+
+if command -v curl >/dev/null 2>&1; then
+    curl -sL "$GITHUB_BASHRC_URL" -o "$LOCAL_BASHRC.tmp"
+    if [ -s "$LOCAL_BASHRC.tmp" ] && ! cmp -s "$LOCAL_BASHRC" "$LOCAL_BASHRC.tmp"; then
+        mv "$LOCAL_BASHRC.tmp" "$LOCAL_BASHRC"
+        echo "Updated .bashrc from GitHub. Reloading..."
+        exec bash
+    else
+        rm -f "$LOCAL_BASHRC.tmp"
+    fi
+fi
+
