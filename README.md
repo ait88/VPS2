@@ -19,6 +19,12 @@ This script automates the initial setup of a VPS running Ubuntu. It creates a se
 - Root access to execute the script
 - A GitHub account with an SSH key uploaded
 
+## Optional: Only update `.bashrc` with single command.
+   
+   ```bash
+   curl -sL https://raw.githubusercontent.com/ait88/VPS/main/.bashrc -o ~/.bashrc && exec bash
+   ```
+
 ## Usage
 
 1. SSH into your VPS as root:
