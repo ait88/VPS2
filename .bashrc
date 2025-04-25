@@ -130,15 +130,22 @@ if ! shopt -oq posix; then
 fi
 
 # ─── Show aliases/functions on login ─────────────────────────────
+
+# ANSI color codes
+GREEN='\033[0;32m'
+CYAN='\033[1;36m'
+RESET='\033[0m'
+
 if [[ -n "$PS1" && -f ~/.bash_aliases ]]; then
-    echo -e "\n📋 Available Aliases:"
-    grep '^alias ' ~/.bash_aliases | sed -E "s/^alias ([^=]+)=/  \1/"
+    echo -e "\n📋 ${CYAN}Available Aliases:${RESET}"
+    grep '^alias ' ~/.bash_aliases | sed -E "s/^alias ([^=]+)=.*/  ${GREEN}\1${RESET}/"
 fi
 
 if [[ -n "$PS1" && -f ~/.bash_functions ]]; then
-    echo -e "\n⚙️  Available Functions:"
-    grep -E '^[a-zA-Z_][a-zA-Z0-9_]*\s*\(\)' ~/.bash_functions | sed -E "s/^([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\).*/  \1/"
+    echo -e "\n⚙️  ${CYAN}Available Functions:${RESET}"
+    grep -E '^[a-zA-Z_][a-zA-Z0-9_]*\s*\(\)' ~/.bash_functions | sed -E "s/^([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\).*/  ${GREEN}\1${RESET}/"
 fi
+
 
 
 # Check if a reboot is required
