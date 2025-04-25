@@ -47,9 +47,6 @@ force_color_prompt=yes
 
 if [ -n "$force_color_prompt" ]; then
     if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then
-        # We have color support; assume it's compliant with Ecma-48
-        # (ISO/IEC-6429). (Lack of such support is extremely rare, and such
-        # a case would tend to support setf rather than setaf.)
         color_prompt=yes
     else
         color_prompt=
@@ -59,8 +56,8 @@ fi
 if [ "$color_prompt" = yes ]; then
     prompt_color='\[\033[;32m\]'
     info_color='\[\033[1;34m\]'
-    prompt_symbol=📛
-    if [ "$EUID" -eq 0 ]; then # Change prompt colors for root user
+    prompt_symbol=📋
+    if [ "$EUID" -eq 0 ]; then
         prompt_color='\[\033[;94m\]'
         info_color='\[\033[1;31m\]'
         prompt_symbol=💀
@@ -83,44 +80,31 @@ esac
 if [ -x /usr/bin/dircolors ]; then
     test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
     alias ls='ls --color=auto'
-    #alias dir='dir --color=auto'
-    #alias vdir='vdir --color=auto'
-
     alias grep='grep --color=auto'
     alias fgrep='fgrep --color=auto'
     alias egrep='egrep --color=auto'
     alias diff='diff --color=auto'
     alias ip='ip --color=auto'
 
-    export LESS_TERMCAP_mb=$'\E[1;31m'     # begin blink
-    export LESS_TERMCAP_md=$'\E[1;36m'     # begin bold
-    export LESS_TERMCAP_me=$'\E[0m'        # reset bold/blink
-    export LESS_TERMCAP_so=$'\E[01;33m'    # begin reverse video
-    export LESS_TERMCAP_se=$'\E[0m'        # reset reverse video
-    export LESS_TERMCAP_us=$'\E[1;32m'     # begin underline
-    export LESS_TERMCAP_ue=$'\E[0m'        # reset underline
+    export LESS_TERMCAP_mb=$'\E[1;31m'
+    export LESS_TERMCAP_md=$'\E[1;36m'
+    export LESS_TERMCAP_me=$'\E[0m'
+    export LESS_TERMCAP_so=$'\E[01;33m'
+    export LESS_TERMCAP_se=$'\E[0m'
+    export LESS_TERMCAP_us=$'\E[1;32m'
+    export LESS_TERMCAP_ue=$'\E[0m'
 fi
 
-# colored GCC warnings and errors
-#export GCC_COLORS='error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01'
-
-# some more ls aliases
 alias ll='ls -lah --color=auto'
 alias la='ls -A --color=auto'
 alias l='ls -CF --color=auto'
 
 # Alias definitions.
-# You may want to put all your additions into a separate file like
-# ~/.bash_aliases, instead of adding them here directly.
-# See /usr/share/doc/bash-doc/examples in the bash-doc package.
-
 if [ -f ~/.bash_aliases ]; then
     . ~/.bash_aliases
 fi
 
-# enable programmable completion features (you don't need to enable
-# this, if it's already enabled in /etc/bash.bashrc and /etc/profile
-# sources /etc/bash.bashrc).
+# Enable programmable completion
 if ! shopt -oq posix; then
   if [ -f /usr/share/bash-completion/bash_completion ]; then
     . /usr/share/bash-completion/bash_completion
@@ -129,9 +113,7 @@ if ! shopt -oq posix; then
   fi
 fi
 
-# ─── Show aliases/functions on login ─────────────────────────────
-
-# ANSI color codes
+# ─── Show aliases/functions on login ───
 GREEN='\033[0;32m'
 CYAN='\033[1;36m'
 RESET='\033[0m'
@@ -145,8 +127,6 @@ if [[ -n "$PS1" && -f ~/.bash_functions ]]; then
     echo -e "\n⚙️  ${CYAN}Available Functions:${RESET}"
     grep -E '^[a-zA-Z_][a-zA-Z0-9_]*\s*\(\)' ~/.bash_functions | sed -E "s/^([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\).*/  ${GREEN}\1${RESET}/"
 fi
-
-
 
 # Check if a reboot is required
 if [ -f /var/run/reboot-required ]; then
