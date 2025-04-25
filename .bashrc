@@ -136,6 +136,9 @@ else
   echo -e "\033[1;32m✅ No reboot needed\033[0m"
 fi
 
+# Auto-update .bash_aliases from GitHub
+curl -sSf https://raw.githubusercontent.com/ait88/VPS/main/.bash_aliases -o ~/.bash_aliases && source ~/.bash_aliases
+
 # Auto-update .bashrc from GitHub
 GITHUB_BASHRC_URL="https://raw.githubusercontent.com/ait88/VPS/main/.bashrc"
 LOCAL_BASHRC="$HOME/.bashrc"
