@@ -56,7 +56,7 @@ fi
 if [ "$color_prompt" = yes ]; then
     prompt_color='\[\033[;32m\]'
     info_color='\[\033[1;34m\]'
-    prompt_symbol=📋
+    prompt_symbol=📛
     if [ "$EUID" -eq 0 ]; then
         prompt_color='\[\033[;94m\]'
         info_color='\[\033[1;31m\]'
@@ -115,14 +115,14 @@ fi
 
 # ─── Show aliases/functions on login ─────────────────────────────
 if [[ -n "$PS1" && -f ~/.bash_aliases ]]; then
-    echo -e "\n📋 \033[1;36mAvailable Aliases:\033[0m"
+    echo -e "\n✳️ \033[1;36mAvailable Aliases:\033[0m"
     grep '^alias ' ~/.bash_aliases | sed -E 's/^alias ([^=]+)=.*/\1/' | while read -r aliasname; do
         echo -e "  \033[0;32m${aliasname}\033[0m"
     done
 fi
 
 if [[ -n "$PS1" && -f ~/.bash_functions ]]; then
-    echo -e "\n⚙️  \033[1;36mAvailable Functions:\033[0m"
+    echo -e "\n✳️  \033[1;36mAvailable Functions:\033[0m"
     grep -E '^[a-zA-Z_][a-zA-Z0-9_]*\s*\(\)' ~/.bash_functions | sed -E 's/^([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\).*/\1/' | while read -r fname; do
         echo -e "  \033[0;32m${fname}\033[0m"
     done
