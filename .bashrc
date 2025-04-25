@@ -129,6 +129,17 @@ if ! shopt -oq posix; then
   fi
 fi
 
+# ─── Show aliases/functions on login ─────────────────────────────
+if [[ -n "$PS1" && -f ~/.bash_aliases ]]; then
+    echo -e "\n📋 Available Aliases:"
+    grep '^alias ' ~/.bash_aliases | sed "s/^alias /  /"
+fi
+
+if [[ -n "$PS1" && -f ~/.bash_functions ]]; then
+    echo -e "\n⚙️  Available Functions:"
+    grep '() {' ~/.bash_functions | sed "s/() {/  /"
+fi
+
 # Check if a reboot is required
 if [ -f /var/run/reboot-required ]; then
   echo -e "\033[1;31m🔁 Reboot is required!\033[0m"
