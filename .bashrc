@@ -136,10 +136,11 @@ else
   echo -e "\033[1;32m✅ No reboot needed\033[0m"
 fi
 
-# Auto-update .bashrc and .bash_aliases from GitHub
+# Auto-update .bashrc, .bash_aliases, and .bash_functions from GitHub
 GITHUB_BASE_URL="https://raw.githubusercontent.com/ait88/VPS/main"
 LOCAL_BASHRC="$HOME/.bashrc"
 LOCAL_BASH_ALIASES="$HOME/.bash_aliases"
+LOCAL_BASH_FUNCTIONS="$HOME/.bash_functions"
 
 update_file() {
     local url="$1"
@@ -160,7 +161,8 @@ update_file() {
 if command -v curl >/dev/null 2>&1; then
     update_file "$GITHUB_BASE_URL/.bashrc" "$LOCAL_BASHRC"
     update_file "$GITHUB_BASE_URL/.bash_aliases" "$LOCAL_BASH_ALIASES"
+    update_file "$GITHUB_BASE_URL/.bash_functions" "$LOCAL_BASH_FUNCTIONS"
+
     [ -f "$LOCAL_BASH_ALIASES" ] && source "$LOCAL_BASH_ALIASES"
+    [ -f "$LOCAL_BASH_FUNCTIONS" ] && source "$LOCAL_BASH_FUNCTIONS"
 fi
-
-
