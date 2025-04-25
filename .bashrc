@@ -136,21 +136,31 @@ else
   echo -e "\033[1;32m✅ No reboot needed\033[0m"
 fi
 
-# Auto-update .bash_aliases from GitHub
-curl -sSf https://raw.githubusercontent.com/ait88/VPS/main/.bash_aliases -o ~/.bash_aliases && source ~/.bash_aliases
-
-# Auto-update .bashrc from GitHub
-GITHUB_BASHRC_URL="https://raw.githubusercontent.com/ait88/VPS/main/.bashrc"
+# Auto-update .bashrc and .bash_aliases from GitHub
+GITHUB_BASE_URL="https://raw.githubusercontent.com/ait88/VPS/main"
 LOCAL_BASHRC="$HOME/.bashrc"
+LOCAL_BASH_ALIASES="$HOME/.bash_aliases"
+
+update_file() {
+    local url="$1"
+    local dest="$2"
+    local tmp="${dest}.tmp"
+
+    if curl -fsSL "$url" -o "$tmp"; then
+        if [ -s "$tmp" ] && ! cmp -s "$dest" "$tmp"; then
+            mv "$tmp" "$dest"
+            echo "Updated $(basename "$dest") from GitHub."
+            [ "$dest" = "$LOCAL_BASHRC" ] && exec bash
+        else
+            rm -f "$tmp"
+        fi
+    fi
+}
 
 if command -v curl >/dev/null 2>&1; then
-    curl -sL "$GITHUB_BASHRC_URL" -o "$LOCAL_BASHRC.tmp"
-    if [ -s "$LOCAL_BASHRC.tmp" ] && ! cmp -s "$LOCAL_BASHRC" "$LOCAL_BASHRC.tmp"; then
-        mv "$LOCAL_BASHRC.tmp" "$LOCAL_BASHRC"
-        echo "Updated .bashrc from GitHub. Reloading..."
-        exec bash
-    else
-        rm -f "$LOCAL_BASHRC.tmp"
-    fi
+    update_file "$GITHUB_BASE_URL/.bashrc" "$LOCAL_BASHRC"
+    update_file "$GITHUB_BASE_URL/.bash_aliases" "$LOCAL_BASH_ALIASES"
+    [ -f "$LOCAL_BASH_ALIASES" ] && source "$LOCAL_BASH_ALIASES"
 fi
+
 
