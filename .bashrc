@@ -132,13 +132,14 @@ fi
 # ─── Show aliases/functions on login ─────────────────────────────
 if [[ -n "$PS1" && -f ~/.bash_aliases ]]; then
     echo -e "\n📋 Available Aliases:"
-    grep '^alias ' ~/.bash_aliases | sed "s/^alias /  /"
+    grep '^alias ' ~/.bash_aliases | sed -E "s/^alias ([^=]+)=/  \1/"
 fi
 
 if [[ -n "$PS1" && -f ~/.bash_functions ]]; then
     echo -e "\n⚙️  Available Functions:"
-    grep '() {' ~/.bash_functions | sed "s/() {/  /"
+    grep -E '^[a-zA-Z_][a-zA-Z0-9_]*\s*\(\)' ~/.bash_functions | sed -E "s/^([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\).*/  \1/"
 fi
+
 
 # Check if a reboot is required
 if [ -f /var/run/reboot-required ]; then
