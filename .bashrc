@@ -114,24 +114,19 @@ if ! shopt -oq posix; then
 fi
 
 # ─── Show aliases/functions on login ─────────────────────────────
-GREEN='\033[0;32m'
-CYAN='\033[1;36m'
-RESET='\033[0m'
-
 if [[ -n "$PS1" && -f ~/.bash_aliases ]]; then
-    echo -e "\n📋 ${CYAN}Available Aliases:${RESET}"
+    echo -e "\n📋 \033[1;36mAvailable Aliases:\033[0m"
     grep '^alias ' ~/.bash_aliases | sed -E 's/^alias ([^=]+)=.*/\1/' | while read -r aliasname; do
-        printf "  ${GREEN}%s${RESET}\n" "$aliasname"
+        echo -e "  \033[0;32m${aliasname}\033[0m"
     done
 fi
 
 if [[ -n "$PS1" && -f ~/.bash_functions ]]; then
-    echo -e "\n⚙️  ${CYAN}Available Functions:${RESET}"
+    echo -e "\n⚙️  \033[1;36mAvailable Functions:\033[0m"
     grep -E '^[a-zA-Z_][a-zA-Z0-9_]*\s*\(\)' ~/.bash_functions | sed -E 's/^([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\).*/\1/' | while read -r fname; do
-        printf "  ${GREEN}%s${RESET}\n" "$fname"
+        echo -e "  \033[0;32m${fname}\033[0m"
     done
 fi
-
 
 # Check if a reboot is required
 if [ -f /var/run/reboot-required ]; then
