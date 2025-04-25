@@ -11,7 +11,7 @@ alias mem='free -h'
 alias cpu='lscpu | grep "Model name\|CPU(s)"'
 alias disk='lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT'
 alias dfh='df -h'
-alias du1='du -sh * 2>/dev/null | sort -h'  # Disk usage per directory
+alias du1='du -sh * 2>/dev/null | sort -h'
 
 # Networking:
 alias ports='ss -tuln'
