@@ -1,7 +1,7 @@
 # ~/.bash_aliases
 
 # System cleanup & package management:
-alias cls='clear'
+alias cls='clear && source ~/.bashrc'
 alias update='apt update && apt list --upgradable'
 alias upgrade='apt full-upgrade -y'
 alias cleanup='apt autoremove --purge -y && apt clean'
