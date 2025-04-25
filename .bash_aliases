@@ -17,7 +17,3 @@ alias du1='du -sh * 2>/dev/null | sort -h'
 alias ports='ss -tuln'
 alias ipinfo='ip -brief address'
 alias pingg='ping 8.8.8.8'
-
-# Root / rebooting:
-alias rebo='systemctl reboot'
-alias halt='systemctl poweroff'
