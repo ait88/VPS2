@@ -154,12 +154,14 @@ LOCAL_BASH_ALIASES="$HOME/.bash_aliases"
 LOCAL_BASH_FUNCTIONS="$HOME/.bash_functions"
 
 update_file() {
+    echo "Checking $(basename "$dest")..."
     local url="$1"
     local dest="$2"
     local tmp="${dest}.tmp"
 
     if curl -fsSL "$url" -o "$tmp"; then
         if [ -s "$tmp" ] && ! cmp -s "$dest" "$tmp"; then
+            echo "Replacing $dest with updated version"
             mv "$tmp" "$dest"
             echo "Updated $(basename "$dest") from GitHub."
             [ "$dest" = "$LOCAL_BASHRC" ] && exec bash
