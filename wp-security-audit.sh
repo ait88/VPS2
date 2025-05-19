@@ -4,10 +4,27 @@
 # This script gathers information about WordPress installations to help identify security issues
 # Run this script from the directory containing your WordPress installation
 
-# Set output file
-OUTPUT_FILE="wp_security_audit_$(date +%Y%m%d_%H%M%S).txt"
+# Set up script variables
 SCRIPT_VERSION="1.1"
 GITHUB_URL="https://raw.githubusercontent.com/ait88/VPS/refs/heads/main/wp-security-audit.sh"
+FIX_ISSUES=false
+FORCE_UPDATE=false
+
+# Set output file with domain name
+# Extract domain from current directory path (common in cPanel environments)
+DOMAIN=$(basename "$PWD" 2>/dev/null)
+if [ "$DOMAIN" = "public_html" ]; then
+    # If we're in public_html, try to get domain from parent directory
+    DOMAIN=$(basename "$(dirname "$PWD")" 2>/dev/null)
+fi
+
+# Try hostname as fallback if domain extraction failed
+if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "home" ]; then
+    DOMAIN=$(hostname 2>/dev/null | sed 's/\./_/g')
+fi
+
+# Create output filename with domain and date in DDMMYY format
+OUTPUT_FILE="${DOMAIN}_audit_$(date +%d%m%y_%H%M%S).txt"
 
 # Function to update the script from GitHub
 update_script() {
@@ -37,9 +54,12 @@ update_script() {
     if [ "$LATEST_VERSION" != "$SCRIPT_VERSION" ]; then
         echo "New version available: $LATEST_VERSION (current: $SCRIPT_VERSION)"
         echo "Updating script..."
+        # Convert Windows line endings to Unix before saving
+        LATEST_SCRIPT=$(echo "$LATEST_SCRIPT" | tr -d '\r')
         echo "$LATEST_SCRIPT" > "$0"
         chmod +x "$0"
-        echo "Script updated successfully. Please run it again."
+        echo "Script updated to version $LATEST_VERSION. Restarting..."
+        exec "$0" "$@"  # Restart the script with the same arguments
         exit 0
     else
         echo "You are running the latest version: $SCRIPT_VERSION"
@@ -210,56 +230,51 @@ get_db_credentials() {
     fi
 }
 
-# Function to check for common security issues
-check_security_issues() {
+# Function to fix common security issues
+fix_security_issues() {
     local wp_dir="$1"
+    local issues_fixed=0
     
-    echo "Security check:"
+    echo "Fixing security issues:"
     
-    # Check directory permissions
-    if [ -d "$wp_dir" ]; then
-        dir_perms=$(stat -c "%a" "$wp_dir" 2>/dev/null)
-        if [ "$dir_perms" == "777" ]; then
-            echo "  - WordPress directory has insecure permissions (777)"
-        fi
-    fi
-    
-    # Check wp-config.php permissions
+    # Fix wp-config.php permissions
     if [ -f "$wp_dir/wp-config.php" ]; then
         config_perms=$(stat -c "%a" "$wp_dir/wp-config.php" 2>/dev/null)
-        if [ "$config_perms" == "777" ] || [ "$config_perms" == "666" ]; then
-            echo "  - wp-config.php has insecure permissions ($config_perms)"
+        if [ "$config_perms" == "777" ] || [ "$config_perms" == "666" ] || [ "$config_perms" == "644" ]; then
+            echo "  - Fixing wp-config.php permissions from $config_perms to 640"
+            chmod 640 "$wp_dir/wp-config.php" 2>/dev/null
+            issues_fixed=$((issues_fixed+1))
         fi
     fi
     
-    # Check for debug mode
-    if [ -f "$wp_dir/wp-config.php" ] && grep -q "WP_DEBUG.*true" "$wp_dir/wp-config.php"; then
-        echo "  - WP_DEBUG is enabled (potential security risk)"
-    fi
-    
-    # Check for file editor
-    if [ -f "$wp_dir/wp-config.php" ] && grep -q "DISALLOW_FILE_EDIT.*false" "$wp_dir/wp-config.php"; then
-        echo "  - File editing is enabled (potential security risk)"
-    fi
-    
-    # Check for suspicious files in uploads
+    # Remove PHP files from uploads directory (potential malware)
     if [ -d "$wp_dir/wp-content/uploads" ]; then
         php_in_uploads=$(find "$wp_dir/wp-content/uploads" -name "*.php" -type f 2>/dev/null | wc -l)
         if [ "$php_in_uploads" -gt 0 ]; then
             echo "  - Found $php_in_uploads PHP files in uploads directory (potential malware)"
+            echo "    These should be manually reviewed and removed if malicious"
             find "$wp_dir/wp-content/uploads" -name "*.php" -type f 2>/dev/null | head -5 | while read file; do
                 echo "    - $file"
             done
+            issues_fixed=$((issues_fixed+php_in_uploads))
         fi
     fi
     
-    # Check for common backdoor filenames
+    # Fix suspicious files with double extensions
     suspicious_files=$(find "$wp_dir" -type f -name "*.ico.php" -o -name "*.png.php" -o -name "*.jpg.php" -o -name "*shell*.php" 2>/dev/null | wc -l)
     if [ "$suspicious_files" -gt 0 ]; then
         echo "  - Found $suspicious_files suspiciously named files (potential backdoors)"
+        echo "    These should be manually reviewed and removed if malicious"
         find "$wp_dir" -type f -name "*.ico.php" -o -name "*.png.php" -o -name "*.jpg.php" -o -name "*shell*.php" 2>/dev/null | head -5 | while read file; do
             echo "    - $file"
         done
+        issues_fixed=$((issues_fixed+suspicious_files))
+    fi
+    
+    if [ "$issues_fixed" -eq 0 ]; then
+        echo "  - No issues fixed"
+    else
+        echo "  - Fixed $issues_fixed issues"
     fi
 }
 
@@ -297,6 +312,12 @@ run_audit() {
         check_security_issues "$wp_dir"
         echo ""
         
+        # Fix security issues if --fix option is provided
+        if [ "$FIX_ISSUES" = true ]; then
+            fix_security_issues "$wp_dir"
+            echo ""
+        fi
+        
         check_recent_files "$wp_dir" 7
         echo ""
     else
@@ -328,6 +349,12 @@ run_audit() {
                 check_security_issues "$wp_dir"
                 echo ""
                 
+                # Fix security issues if --fix option is provided
+                if [ "$FIX_ISSUES" = true ]; then
+                    fix_security_issues "$wp_dir"
+                    echo ""
+                fi
+                
                 check_recent_files "$wp_dir" 7
                 echo ""
             fi
@@ -339,10 +366,54 @@ run_audit() {
     fi
 }
 
-# Check for update flag
-if [ "$1" == "--update" ]; then
-    update_script
+# Process command line arguments
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --update)
+            FORCE_UPDATE=true
+            ;;
+        --fix)
+            FIX_ISSUES=true
+            echo "Fix mode enabled - will attempt to fix security issues"
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--update] [--fix]"
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+# Always check for updates unless specifically running with --update flag
+if [ "$FORCE_UPDATE" = true ]; then
+    echo "Manual update check requested"
+    update_script "$@"
     exit 0
+else
+    # Check for updates automatically but silently
+    # Only show output if an update is available
+    if command -v curl &> /dev/null; then
+        LATEST_SCRIPT=$(curl -s "$GITHUB_URL")
+    elif command -v wget &> /dev/null; then
+        LATEST_SCRIPT=$(wget -q -O - "$GITHUB_URL")
+    fi
+    
+    if [ ! -z "$LATEST_SCRIPT" ]; then
+        LATEST_VERSION=$(echo "$LATEST_SCRIPT" | grep "SCRIPT_VERSION=" | head -1 | cut -d'"' -f2)
+        
+        if [ ! -z "$LATEST_VERSION" ] && [ "$LATEST_VERSION" != "$SCRIPT_VERSION" ]; then
+            echo "New version available: $LATEST_VERSION (current: $SCRIPT_VERSION)"
+            echo "Updating script..."
+            # Convert Windows line endings to Unix before saving
+            LATEST_SCRIPT=$(echo "$LATEST_SCRIPT" | tr -d '\r')
+            echo "$LATEST_SCRIPT" > "$0"
+            chmod +x "$0"
+            echo "Script updated to version $LATEST_VERSION. Restarting..."
+            exec "$0" "$@"  # Restart the script with the same arguments
+            exit 0
+        fi
+    fi
 fi
 
 # Run the audit and save to file
