@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# WordPress Security Audit Script v1.2
+# WordPress Security Audit Script v1.1
 # This script gathers information about WordPress installations to help identify security issues
 # Run this script from the directory containing your WordPress installation
 
@@ -50,6 +50,8 @@ update_script() {
         echo "Could not determine latest version."
         return 1
     fi
+    
+    echo "Local version: $SCRIPT_VERSION, GitHub version: $LATEST_VERSION"
     
     if [ "$LATEST_VERSION" != "$SCRIPT_VERSION" ]; then
         echo "New version available: $LATEST_VERSION (current: $SCRIPT_VERSION)"
