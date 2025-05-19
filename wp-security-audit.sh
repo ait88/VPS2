@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# WordPress Security Audit Script v1.1
+# WordPress Security Audit Script v1.2
 # This script gathers information about WordPress installations to help identify security issues
 # Run this script from the directory containing your WordPress installation
 
