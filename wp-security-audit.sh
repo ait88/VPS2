@@ -1,11 +1,50 @@
 #!/bin/bash
 
-# WordPress Security Audit Script
+# WordPress Security Audit Script v1.1
 # This script gathers information about WordPress installations to help identify security issues
-# Run this script from the parent directory of your WordPress installations
+# Run this script from the directory containing your WordPress installation
 
 # Set output file
 OUTPUT_FILE="wp_security_audit_$(date +%Y%m%d_%H%M%S).txt"
+SCRIPT_VERSION="1.1"
+GITHUB_URL="https://raw.githubusercontent.com/ait88/VPS/refs/heads/main/wp-security-audit.sh"
+
+# Function to update the script from GitHub
+update_script() {
+    echo "Checking for updates..."
+    if command -v curl &> /dev/null; then
+        LATEST_SCRIPT=$(curl -s "$GITHUB_URL")
+    elif command -v wget &> /dev/null; then
+        LATEST_SCRIPT=$(wget -q -O - "$GITHUB_URL")
+    else
+        echo "Neither curl nor wget is available. Cannot check for updates."
+        return 1
+    fi
+    
+    if [ -z "$LATEST_SCRIPT" ]; then
+        echo "Failed to download the latest script."
+        return 1
+    fi
+    
+    # Extract version from the downloaded script
+    LATEST_VERSION=$(echo "$LATEST_SCRIPT" | grep "SCRIPT_VERSION=" | head -1 | cut -d'"' -f2)
+    
+    if [ -z "$LATEST_VERSION" ]; then
+        echo "Could not determine latest version."
+        return 1
+    fi
+    
+    if [ "$LATEST_VERSION" != "$SCRIPT_VERSION" ]; then
+        echo "New version available: $LATEST_VERSION (current: $SCRIPT_VERSION)"
+        echo "Updating script..."
+        echo "$LATEST_SCRIPT" > "$0"
+        chmod +x "$0"
+        echo "Script updated successfully. Please run it again."
+        exit 0
+    else
+        echo "You are running the latest version: $SCRIPT_VERSION"
+    fi
+}
 
 # Function to check if a file contains suspicious patterns
 check_suspicious_patterns() {
@@ -19,6 +58,28 @@ check_suspicious_patterns() {
     if $suspicious; then
         echo "SUSPICIOUS: $file"
     fi
+}
+
+# Function to detect WordPress installations
+detect_wordpress() {
+    local dir="$1"
+    local is_wordpress=false
+    
+    # Basic checks for WordPress files
+    if [ -f "$dir/wp-config.php" ]; then
+        is_wordpress=true
+        echo "WordPress detected (wp-config.php exists)"
+    elif [ -d "$dir/wp-includes" ] && [ -d "$dir/wp-admin" ]; then
+        is_wordpress=true
+        echo "WordPress detected (wp-includes and wp-admin directories exist)"
+    elif [ -f "$dir/wp-login.php" ]; then
+        is_wordpress=true
+        echo "WordPress detected (wp-login.php exists)"
+    else
+        echo "No WordPress installation detected in $dir"
+    fi
+    
+    return $([ "$is_wordpress" = true ] && echo 0 || echo 1)
 }
 
 # Function to get WordPress version
@@ -64,7 +125,7 @@ get_plugins_info() {
             echo "  - $plugin_name (Version: $version)"
             
             # Get the last modified date of the plugin directory
-            last_modified=$(find "$plugin" -type f -name "*.php" -exec stat -c "%y" {} \; | sort -r | head -1)
+            last_modified=$(find "$plugin" -type f -name "*.php" -exec stat -c "%y" {} \; 2>/dev/null | sort -r | head -1)
             if [ ! -z "$last_modified" ]; then
                 echo "    Last modified: $last_modified"
             fi
@@ -99,7 +160,7 @@ get_themes_info() {
             echo "  - $theme_name (Version: $version)"
             
             # Get the last modified date of the theme directory
-            last_modified=$(find "$theme" -type f -name "*.php" -exec stat -c "%y" {} \; | sort -r | head -1)
+            last_modified=$(find "$theme" -type f -name "*.php" -exec stat -c "%y" {} \; 2>/dev/null | sort -r | head -1)
             if [ ! -z "$last_modified" ]; then
                 echo "    Last modified: $last_modified"
             fi
@@ -113,8 +174,8 @@ check_recent_files() {
     local days="$2"
     
     echo "Files modified in the last $days days:"
-    find "$wp_dir" -type f -mtime -"$days" | sort -r | while read file; do
-        echo "  - $file ($(stat -c "%y" "$file"))"
+    find "$wp_dir" -type f -mtime -"$days" 2>/dev/null | sort -r | while read file; do
+        echo "  - $file ($(stat -c "%y" "$file" 2>/dev/null))"
         # Check for suspicious patterns in recently modified PHP files
         if [[ "$file" == *.php ]]; then
             check_suspicious_patterns "$file"
@@ -157,7 +218,7 @@ check_security_issues() {
     
     # Check directory permissions
     if [ -d "$wp_dir" ]; then
-        dir_perms=$(stat -c "%a" "$wp_dir")
+        dir_perms=$(stat -c "%a" "$wp_dir" 2>/dev/null)
         if [ "$dir_perms" == "777" ]; then
             echo "  - WordPress directory has insecure permissions (777)"
         fi
@@ -165,7 +226,7 @@ check_security_issues() {
     
     # Check wp-config.php permissions
     if [ -f "$wp_dir/wp-config.php" ]; then
-        config_perms=$(stat -c "%a" "$wp_dir/wp-config.php")
+        config_perms=$(stat -c "%a" "$wp_dir/wp-config.php" 2>/dev/null)
         if [ "$config_perms" == "777" ] || [ "$config_perms" == "666" ]; then
             echo "  - wp-config.php has insecure permissions ($config_perms)"
         fi
@@ -183,97 +244,43 @@ check_security_issues() {
     
     # Check for suspicious files in uploads
     if [ -d "$wp_dir/wp-content/uploads" ]; then
-        php_in_uploads=$(find "$wp_dir/wp-content/uploads" -name "*.php" -type f | wc -l)
+        php_in_uploads=$(find "$wp_dir/wp-content/uploads" -name "*.php" -type f 2>/dev/null | wc -l)
         if [ "$php_in_uploads" -gt 0 ]; then
             echo "  - Found $php_in_uploads PHP files in uploads directory (potential malware)"
-            find "$wp_dir/wp-content/uploads" -name "*.php" -type f | head -5 | while read file; do
+            find "$wp_dir/wp-content/uploads" -name "*.php" -type f 2>/dev/null | head -5 | while read file; do
                 echo "    - $file"
             done
         fi
     fi
     
     # Check for common backdoor filenames
-    suspicious_files=$(find "$wp_dir" -type f -name "*.ico.php" -o -name "*.png.php" -o -name "*.jpg.php" -o -name "*shell*.php" | wc -l)
+    suspicious_files=$(find "$wp_dir" -type f -name "*.ico.php" -o -name "*.png.php" -o -name "*.jpg.php" -o -name "*shell*.php" 2>/dev/null | wc -l)
     if [ "$suspicious_files" -gt 0 ]; then
         echo "  - Found $suspicious_files suspiciously named files (potential backdoors)"
-        find "$wp_dir" -type f -name "*.ico.php" -o -name "*.png.php" -o -name "*.jpg.php" -o -name "*shell*.php" | head -5 | while read file; do
+        find "$wp_dir" -type f -name "*.ico.php" -o -name "*.png.php" -o -name "*.jpg.php" -o -name "*shell*.php" 2>/dev/null | head -5 | while read file; do
             echo "    - $file"
         done
     fi
 }
 
-# Function to find common access points or patterns
-check_common_patterns() {
-    local wp_dirs=("$@")
-    local common_plugins=()
-    local common_themes=()
-    
-    echo "Checking for common patterns across sites..."
-    
-    # Parse and analyze plugin data
-    for wp_dir in "${wp_dirs[@]}"; do
-        if [ -d "$wp_dir/wp-content/plugins" ]; then
-            for plugin in "$wp_dir/wp-content/plugins"/*; do
-                if [ -d "$plugin" ]; then
-                    plugin_name=$(basename "$plugin")
-                    if [[ ! " ${common_plugins[@]} " =~ " ${plugin_name} " ]]; then
-                        common_plugins+=("$plugin_name")
-                    fi
-                fi
-            done
-        fi
-        
-        if [ -d "$wp_dir/wp-content/themes" ]; then
-            for theme in "$wp_dir/wp-content/themes"/*; do
-                if [ -d "$theme" ]; then
-                    theme_name=$(basename "$theme")
-                    if [[ ! " ${common_themes[@]} " =~ " ${theme_name} " ]]; then
-                        common_themes+=("$theme_name")
-                    fi
-                fi
-            done
-        fi
-    done
-    
-    echo "Common plugins across sites: ${common_plugins[@]}"
-    echo "Common themes across sites: ${common_themes[@]}"
-}
-
 # Main function to run the audit
 run_audit() {
-    # Check if working in home directory
+    # Get current directory
     current_dir=$(pwd)
     echo "Current directory: $current_dir"
     
-    # Find all WordPress installations
-    echo "Finding WordPress installations in $current_dir..."
-    # First check if wp-config.php exists in the current directory
-    if [ -f "$current_dir/wp-config.php" ]; then
-        wp_dirs+=("$current_dir")
-        echo "Found WordPress at: $current_dir"
-    fi
-    wp_dirs=()
+    # List directory contents to verify we can see WordPress files
+    echo "Directory listing:"
+    ls -la | head -20
+    echo "(showing first 20 entries only)"
+    echo ""
     
-    # Look for wp-config.php files to identify WordPress installations
-    # Using a simpler approach that's more compatible with restricted environments
-    for config_file in $(find "$current_dir" -name "wp-config.php" -type f); do
-        wp_dir=$(dirname "$config_file")
-        wp_dirs+=("$wp_dir")
-        echo "Found WordPress at: $wp_dir"
-    done
-    
-    if [ ${#wp_dirs[@]} -eq 0 ]; then
-        echo "No WordPress installations found in $current_dir"
-        exit 1
-    fi
-    
-    echo "Found ${#wp_dirs[@]} WordPress installations"
-    
-    # Process each WordPress installation
-    for wp_dir in "${wp_dirs[@]}"; do
-        echo "=========================================="
-        echo "Analyzing WordPress at: $wp_dir"
-        echo "=========================================="
+    # Check for WordPress in current directory
+    echo "Checking for WordPress in current directory..."
+    if detect_wordpress "$current_dir"; then
+        # WordPress found in current directory
+        echo "Analyzing WordPress installation in current directory..."
+        wp_dir="$current_dir"
         
         echo "WordPress Version: $(get_wp_version "$wp_dir")"
         echo ""
@@ -292,15 +299,55 @@ run_audit() {
         
         check_recent_files "$wp_dir" 7
         echo ""
-    done
-    
-    # Check for common patterns across sites
-    check_common_patterns "${wp_dirs[@]}"
+    else
+        # Try to find WordPress installations in subdirectories
+        echo "Looking for WordPress installations in subdirectories..."
+        found_wp=false
+        
+        # Simple approach to find WordPress directories
+        for dir in $(find "$current_dir" -type d -maxdepth 2 2>/dev/null); do
+            if [ -f "$dir/wp-config.php" ]; then
+                echo "Found WordPress at: $dir"
+                found_wp=true
+                
+                echo "Analyzing WordPress installation at: $dir"
+                wp_dir="$dir"
+                
+                echo "WordPress Version: $(get_wp_version "$wp_dir")"
+                echo ""
+                
+                get_plugins_info "$wp_dir"
+                echo ""
+                
+                get_themes_info "$wp_dir"
+                echo ""
+                
+                get_db_credentials "$wp_dir"
+                echo ""
+                
+                check_security_issues "$wp_dir"
+                echo ""
+                
+                check_recent_files "$wp_dir" 7
+                echo ""
+            fi
+        done
+        
+        if [ "$found_wp" = false ]; then
+            echo "No WordPress installations found in $current_dir or immediate subdirectories"
+        fi
+    fi
 }
+
+# Check for update flag
+if [ "$1" == "--update" ]; then
+    update_script
+    exit 0
+fi
 
 # Run the audit and save to file
 {
-    echo "WordPress Security Audit"
+    echo "WordPress Security Audit v$SCRIPT_VERSION"
     echo "Date: $(date)"
     echo "Server: $(hostname)"
     echo ""
@@ -312,3 +359,4 @@ run_audit() {
 } | tee "$OUTPUT_FILE"
 
 echo "Audit complete! Results saved to $OUTPUT_FILE"
+echo "To check for script updates, run: $0 --update"
