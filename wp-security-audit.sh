@@ -74,9 +74,12 @@ check_suspicious_patterns() {
     # Common malware patterns
     grep -l "base64_decode\|eval(" "$file" > /dev/null 2>&1 && suspicious=true
     grep -l "<?php" "$file" | grep -v ".php$" > /dev/null 2>&1 && suspicious=true
+    grep -l "assert\|system\|passthru\|exec\|shell_exec" "$file" > /dev/null 2>&1 && suspicious=true
     
     if $suspicious; then
-        echo "SUSPICIOUS: $file"
+        return 0  # True in bash exit code terms
+    else
+        return 1  # False in bash exit code terms
     fi
 }
 
@@ -116,91 +119,180 @@ get_wp_version() {
 get_plugins_info() {
     local wp_dir="$1"
     local plugins_dir="$wp_dir/wp-content/plugins"
+    local max_plugins=25  # Maximum number of plugins to display detailed info for
     
     if [ ! -d "$plugins_dir" ]; then
         echo "No plugins directory found"
         return
     fi
     
-    echo "List of installed plugins:"
-    for plugin in "$plugins_dir"/*; do
-        if [ -d "$plugin" ]; then
-            plugin_name=$(basename "$plugin")
-            version="Unknown"
-            
-            # Try to get version from the main plugin file
-            main_file="$plugin/$plugin_name.php"
-            if [ ! -f "$main_file" ]; then
-                # Find the main plugin file
-                main_file=$(grep -l "Plugin Name:" "$plugin"/*.php 2>/dev/null | head -1)
-            fi
-            
-            if [ -f "$main_file" ]; then
-                version=$(grep "Version:" "$main_file" | head -1 | sed 's/.*Version: *\([^ ]*\).*/\1/')
-                if [ -z "$version" ]; then
-                    version="Unknown"
-                fi
-            fi
-            
-            echo "  - $plugin_name (Version: $version)"
-            
-            # Get the last modified date of the plugin directory
-            last_modified=$(find "$plugin" -type f -name "*.php" -exec stat -c "%y" {} \; 2>/dev/null | sort -r | head -1)
-            if [ ! -z "$last_modified" ]; then
-                echo "    Last modified: $last_modified"
+    # Count total plugins
+    local total_plugins=$(find "$plugins_dir" -maxdepth 1 -type d | wc -l)
+    # Subtract 1 for the plugins directory itself
+    total_plugins=$((total_plugins - 1))
+    
+    echo "List of installed plugins (total: $total_plugins, showing most recently modified):"
+    
+    # Get list of plugins sorted by last modification time (most recent first)
+    find "$plugins_dir" -maxdepth 1 -type d -not -path "$plugins_dir" | while read plugin_dir; do
+        last_modified=$(find "$plugin_dir" -type f -name "*.php" -exec stat -c "%Y %n" {} \; 2>/dev/null | sort -nr | head -1 | cut -d' ' -f1)
+        if [ -z "$last_modified" ]; then
+            last_modified=0
+        fi
+        echo "$last_modified $plugin_dir"
+    done | sort -nr | head -$max_plugins | while read timestamp plugin; do
+        plugin_dir=$(echo "$plugin" | cut -d' ' -f2-)
+        plugin_name=$(basename "$plugin_dir")
+        version="Unknown"
+        
+        # Try to get version from the main plugin file
+        main_file="$plugin_dir/$plugin_name.php"
+        if [ ! -f "$main_file" ]; then
+            # Find the main plugin file
+            main_file=$(grep -l "Plugin Name:" "$plugin_dir"/*.php 2>/dev/null | head -1)
+        fi
+        
+        if [ -f "$main_file" ]; then
+            version=$(grep "Version:" "$main_file" | head -1 | sed 's/.*Version: *\([^ ]*\).*/\1/')
+            if [ -z "$version" ]; then
+                version="Unknown"
             fi
         fi
+        
+        echo "  - $plugin_name (Version: $version)"
+        
+        # Get the last modified date of the plugin directory
+        last_modified=$(find "$plugin_dir" -type f -name "*.php" -exec stat -c "%y" {} \; 2>/dev/null | sort -r | head -1)
+        if [ ! -z "$last_modified" ]; then
+            echo "    Last modified: $last_modified"
+        fi
     done
+    
+    if [ "$total_plugins" -gt "$max_plugins" ]; then
+        echo "  ... and $((total_plugins - max_plugins)) more plugins (output truncated)"
+    fi
 }
 
 # Function to get theme information
 get_themes_info() {
     local wp_dir="$1"
     local themes_dir="$wp_dir/wp-content/themes"
+    local max_themes=10  # Maximum number of themes to display detailed info for
     
     if [ ! -d "$themes_dir" ]; then
         echo "No themes directory found"
         return
     fi
     
-    echo "List of installed themes:"
-    for theme in "$themes_dir"/*; do
-        if [ -d "$theme" ]; then
-            theme_name=$(basename "$theme")
-            version="Unknown"
-            
-            # Try to get version from the style.css file
-            if [ -f "$theme/style.css" ]; then
-                version=$(grep "Version:" "$theme/style.css" | head -1 | sed 's/.*Version: *\([^ ]*\).*/\1/')
-                if [ -z "$version" ]; then
-                    version="Unknown"
-                fi
-            fi
-            
-            echo "  - $theme_name (Version: $version)"
-            
-            # Get the last modified date of the theme directory
-            last_modified=$(find "$theme" -type f -name "*.php" -exec stat -c "%y" {} \; 2>/dev/null | sort -r | head -1)
-            if [ ! -z "$last_modified" ]; then
-                echo "    Last modified: $last_modified"
+    # Count total themes
+    local total_themes=$(find "$themes_dir" -maxdepth 1 -type d | wc -l)
+    # Subtract 1 for the themes directory itself
+    total_themes=$((total_themes - 1))
+    
+    echo "List of installed themes (total: $total_themes, showing most recently modified):"
+    
+    # Get list of themes sorted by last modification time (most recent first)
+    find "$themes_dir" -maxdepth 1 -type d -not -path "$themes_dir" | while read theme_dir; do
+        last_modified=$(find "$theme_dir" -type f -name "*.php" -exec stat -c "%Y %n" {} \; 2>/dev/null | sort -nr | head -1 | cut -d' ' -f1)
+        if [ -z "$last_modified" ]; then
+            last_modified=0
+        fi
+        echo "$last_modified $theme_dir"
+    done | sort -nr | head -$max_themes | while read timestamp theme; do
+        theme_dir=$(echo "$theme" | cut -d' ' -f2-)
+        theme_name=$(basename "$theme_dir")
+        version="Unknown"
+        
+        # Try to get version from the style.css file
+        if [ -f "$theme_dir/style.css" ]; then
+            version=$(grep "Version:" "$theme_dir/style.css" | head -1 | sed 's/.*Version: *\([^ ]*\).*/\1/')
+            if [ -z "$version" ]; then
+                version="Unknown"
             fi
         fi
+        
+        echo "  - $theme_name (Version: $version)"
+        
+        # Get the last modified date of the theme directory
+        last_modified=$(find "$theme_dir" -type f -name "*.php" -exec stat -c "%y" {} \; 2>/dev/null | sort -r | head -1)
+        if [ ! -z "$last_modified" ]; then
+            echo "    Last modified: $last_modified"
+        fi
     done
+    
+    if [ "$total_themes" -gt "$max_themes" ]; then
+        echo "  ... and $((total_themes - max_themes)) more themes (output truncated)"
+    fi
 }
 
 # Function to check for recently modified files
 check_recent_files() {
     local wp_dir="$1"
     local days="$2"
+    local max_files="$3"  # Maximum number of files to display
+    local prev_dir=""     # Track previous directory for condensed output
+    local count=0         # Counter for displayed files
     
-    echo "Files modified in the last $days days:"
-    find "$wp_dir" -type f -mtime -"$days" 2>/dev/null | sort -r | while read file; do
-        echo "  - $file ($(stat -c "%y" "$file" 2>/dev/null))"
-        # Check for suspicious patterns in recently modified PHP files
-        if [[ "$file" == *.php ]]; then
-            check_suspicious_patterns "$file"
+    echo "Files modified in the last $days days (limited to $max_files entries):"
+    
+    # First, prioritize checking suspicious file extensions
+    echo "  Checking for suspicious PHP files first..."
+    find "$wp_dir" -type f -name "*.php" -mtime -"$days" 2>/dev/null | grep -v "wp-includes\|wp-admin\|languages" | sort -r | while read file; do
+        # Only display suspicious PHP files
+        is_suspicious=false
+        check_suspicious_patterns "$file" > /dev/null && is_suspicious=true
+        grep -q "eval\|base64\|create_function" "$file" 2>/dev/null && is_suspicious=true
+        
+        if $is_suspicious; then
+            rel_path="${file#$wp_dir/}"
+            echo "  - [SUSPICIOUS] $rel_path ($(stat -c "%y" "$file" 2>/dev/null))"
+            ((count++))
+        fi
+        
+        # Stop if we've reached the maximum
+        if [ "$count" -ge "$max_files" ]; then
+            echo "  ... and more (output truncated, increase max_files to see more)"
+            return
         fi
     done
+    
+    # Then look for any non-core modified files
+    find "$wp_dir" -type f -mtime -"$days" 2>/dev/null | grep -v "wp-includes\|wp-admin\|languages" | sort -r | while read file; do
+        # Skip if we've reached the maximum
+        if [ "$count" -ge "$max_files" ]; then
+            echo "  ... and more (output truncated, increase max_files to see more)"
+            return
+        fi
+        
+        # Check if it's a core file
+        is_core=false
+        echo "$file" | grep -q "wp-includes\|wp-admin" && is_core=true
+        
+        # Only display interesting files (non-core or modified core files)
+        if [ "$is_core" = false ]; then
+            # Get current file directory
+            current_dir=$(dirname "$file")
+            
+            # Get relative path (removes the WordPress root directory prefix)
+            rel_path="${file#$wp_dir/}"
+            
+            # If same directory as previous file, just show filename
+            if [ "$current_dir" = "$prev_dir" ]; then
+                filename=$(basename "$file")
+                echo "  - $filename ($(stat -c "%y" "$file" 2>/dev/null))"
+            else
+                # Show full relative path
+                echo "  - $rel_path ($(stat -c "%y" "$file" 2>/dev/null))"
+                prev_dir="$current_dir"
+            fi
+            
+            ((count++))
+        fi
+    done
+    
+    if [ "$count" -eq 0 ]; then
+        echo "  No significant modified files found in the given timeframe."
+    fi
 }
 
 # Function to extract database credentials
@@ -318,7 +410,7 @@ run_audit() {
             echo ""
         fi
         
-        check_recent_files "$wp_dir" 7
+        check_recent_files "$wp_dir" 7 50  # Limit to 50 most recent files
         echo ""
     else
         # Try to find WordPress installations in subdirectories
@@ -355,7 +447,7 @@ run_audit() {
                     echo ""
                 fi
                 
-                check_recent_files "$wp_dir" 7
+                check_recent_files "$wp_dir" 7 50  # Limit to 50 most recent files
                 echo ""
             fi
         done
