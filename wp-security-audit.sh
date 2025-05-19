@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# WordPress Security Audit Script v1.1
+# WordPress Security Audit Script
 # This script gathers information about WordPress installations to help identify security issues
 # Run this script from the directory containing your WordPress installation
 
 # Set up script variables
-SCRIPT_VERSION="1.2"
+SCRIPT_VERSION="1.3"
 GITHUB_URL="https://raw.githubusercontent.com/ait88/VPS/refs/heads/main/wp-security-audit.sh"
 FIX_ISSUES=false
 FORCE_UPDATE=false
