@@ -5,7 +5,7 @@
 # Run this script from the directory containing your WordPress installation
 
 # Set up script variables
-SCRIPT_VERSION="1.1"
+SCRIPT_VERSION="1.2"
 GITHUB_URL="https://raw.githubusercontent.com/ait88/VPS/refs/heads/main/wp-security-audit.sh"
 FIX_ISSUES=false
 FORCE_UPDATE=false
