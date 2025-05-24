@@ -2,6 +2,15 @@
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
 # for examples
 
+
+####CUSTOM CONFIG####
+##anything between these lines will persist when .bashrc is auto-updated##
+##============================##
+# Locally persistent .bashrc lines
+##============================##
+####END CUSTOM CONFIG####
+
+
 # If not running interactively, don't do anything
 case $- in
     *i*) ;;
@@ -140,6 +149,8 @@ GITHUB_BASE_URL="https://raw.githubusercontent.com/ait88/VPS/main"
 LOCAL_BASHRC="$HOME/.bashrc"
 LOCAL_BASH_ALIASES="$HOME/.bash_aliases"
 LOCAL_BASH_FUNCTIONS="$HOME/.bash_functions"
+CUSTOM_START='####CUSTOM CONFIG####'
+CUSTOM_END='####END CUSTOM CONFIG####'
 
 update_file() {
     local url="$1"
@@ -148,8 +159,20 @@ update_file() {
 
     if curl -fsSL "$url" -o "$tmp"; then
         if [ -s "$tmp" ] && ! cmp -s "$dest" "$tmp"; then
-            echo "Replacing $dest with updated version"
-            mv "$tmp" "$dest"
+            # Only preserve the custom config for .bashrc
+            if [ "$dest" = "$LOCAL_BASHRC" ] && \
+               grep -q "$CUSTOM_START" "$dest" && grep -q "$CUSTOM_END" "$dest"; then
+                # Extract custom config block from the existing file
+                awk "/$CUSTOM_START/,/$CUSTOM_END/" "$dest" > /tmp/custom_config_block.txt
+                # Remove custom config block from the new file (if present)
+                awk "BEGIN{p=1} /$CUSTOM_START/{p=0} /$CUSTOM_END/{p=1; next} p" "$tmp" > "$tmp.nocustom"
+                # Insert custom block after the first line (adapt NR==1 if needed)
+                awk "NR==1{print; system(\"cat /tmp/custom_config_block.txt\"); next} 1" "$tmp.nocustom" > "$tmp.withcustom"
+                mv "$tmp.withcustom" "$dest"
+                rm -f "$tmp.nocustom" "$tmp" /tmp/custom_config_block.txt
+            else
+                mv "$tmp" "$dest"
+            fi
             echo "Updated $(basename "$dest") from GitHub."
             [ "$dest" = "$LOCAL_BASHRC" ] && exec bash
         else
