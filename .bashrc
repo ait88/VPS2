@@ -166,7 +166,7 @@ update_file() {
             # Remove custom config block from the new file (if present)
             awk "BEGIN{p=1} /$CUSTOM_START/{p=0} /$CUSTOM_END/{p=1; next} p" "$tmp" > "$tmp.nocustom"
             # Insert custom block after the first line (adapt NR==1 if needed)
-            awk "NR==1{print; system(\"cat /tmp/custom_config_block.txt\"); next} 1" "$tmp.nocustom" > "$merged"
+            awk "NR==6{print; system(\"cat /tmp/custom_config_block.txt\"); next} 1" "$tmp.nocustom" > "$merged"
             # Compare merged result with local file
             if ! cmp -s "$dest" "$merged"; then
                 echo "Replacing $dest with updated version"
