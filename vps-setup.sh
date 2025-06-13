@@ -41,6 +41,10 @@ fi
 echo "Updating system..."
 apt update && apt upgrade -y
 
+# Install essential tools
+echo "Installing essential utilities (curl, wget, nano, net-tools, rsync)..."
+apt install -y curl wget nano net-tools rsync
+
 # Set password complexity rules
 echo "Setting password complexity requirements..."
 apt install libpam-pwquality -y
