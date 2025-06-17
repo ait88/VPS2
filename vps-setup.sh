@@ -42,8 +42,8 @@ echo "Updating system..."
 apt update && apt upgrade -y
 
 # Install essential tools
-echo "Installing essential utilities (curl, wget, nano, net-tools, rsync)..."
-apt install -y curl wget nano net-tools rsync
+echo "Installing essential utilities (curl, ufw, wget, nano, net-tools, rsync)..."
+apt install -y curl ufw wget nano net-tools rsync
 
 # Set password complexity rules
 echo "Setting password complexity requirements..."
@@ -87,14 +87,14 @@ sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/g' /etc/ssh/ssh
 systemctl restart sshd
 
 # Set up firewall
-echo "Configuring UFW firewall..."
-ufw --force reset
-ufw default deny incoming
-ufw default allow outgoing
+echo "Configuring  firewall..."
+ --force reset
+ default deny incoming
+ default allow outgoing
 for ip in "${ALLOWED_IPS[@]}"; do
-    ufw allow from $ip to any port $SSH_PORT proto tcp
+     allow from $ip to any port $SSH_PORT proto tcp
 done
-ufw enable && ufw reload
+ enable &&  reload
 
 # Fetch and apply custom Bash profile from GitHub
 echo "Fetching custom Bash profile..."
