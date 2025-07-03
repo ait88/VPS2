@@ -1,15 +1,15 @@
 #!/bin/bash
 # setup-wordpress.sh - Modular WordPress installation with backup integration
-# Version: 2.0.0
+# Version: 2.0.1
 # GitHub: https://github.com/ait88/VPS
 
 set -euo pipefail
 
 # ===== CONFIGURATION SECTION =====
-SCRIPT_VERSION="2.0.0"
+SCRIPT_VERSION="2.0.1"
 SCRIPT_URL="https://raw.githubusercontent.com/ait88/VPS/main/setup-wordpress.sh"
-STATE_FILE="/root/.wordpress_setup_state"
-LOG_FILE="/root/wordpress_setup.log"
+STATE_FILE="$HOME/.wordpress_setup_state"
+LOG_FILE="$HOME/wordpress_setup.log"
 BACKUP_USER="wp-backup"
 BACKUP_SSH_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKk1nsYyDbYzYL5UXEc8X9IDBIJECt9mQzy307M6h7p5"
 
@@ -147,11 +147,14 @@ clear_state() {
 }
 
 # ===== UTILITY FUNCTIONS =====
-check_root() {
+check_sudo() {
     if [ "$EUID" -ne 0 ]; then
-        log_error "This script must be run as root"
-        exit 1
+        if ! sudo -n true 2>/dev/null; then
+            log_error "This script requires sudo privileges. Please run with sudo or configure passwordless sudo."
+            exit 1
+        fi
     fi
+    log_info "Sudo privileges confirmed"
 }
 
 check_os() {
@@ -253,8 +256,8 @@ check_existing_installation() {
         return 0
     fi
     
-    # Check root access
-    check_root
+    # Check sudo access
+    check_sudo
     
     # Check OS
     check_os
@@ -277,11 +280,11 @@ check_existing_installation() {
     
     # Check for conflicting services
     for service in apache2 lighttpd; do
-        if systemctl is-active --quiet $service; then
+        if sudo systemctl is-active --quiet $service 2>/dev/null; then
             log_error "Conflicting service detected: $service is running"
             if confirm_action "Stop and disable $service?"; then
-                systemctl stop $service
-                systemctl disable $service
+                sudo systemctl stop $service
+                sudo systemctl disable $service
                 log_success "$service stopped and disabled"
             else
                 log_error "Cannot continue with $service running"
@@ -344,7 +347,7 @@ show_main_menu() {
     
     # Update package lists
     log_info "Updating package lists..."
-    apt-get update -qq || { log_error "Failed to update package lists"; exit 1; }
+    sudo apt-get update -qq || { log_error "Failed to update package lists"; exit 1; }
     
     # Detect PHP version
     local php_version="8.2"
@@ -377,7 +380,7 @@ show_main_menu() {
     )
     
     log_info "Installing packages..."
-    DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}" || {
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}" || {
         log_error "Package installation failed"
         exit 1
     }
@@ -387,13 +390,13 @@ show_main_menu() {
         log_info "Installing WP-CLI..."
         curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
         chmod +x wp-cli.phar
-        mv wp-cli.phar /usr/local/bin/wp
+        sudo mv wp-cli.phar /usr/local/bin/wp
     fi
     
     # Verify critical services
     for service in nginx "php${php_version}-fpm" mariadb; do
-        systemctl is-enabled --quiet $service || systemctl enable $service
-        systemctl is-active --quiet $service || systemctl start $service
+        sudo systemctl is-enabled --quiet $service || sudo systemctl enable $service
+        sudo systemctl is-active --quiet $service || sudo systemctl start $service
     done
     
     save_state "DEPENDENCIES_INSTALLED" "true"
@@ -462,6 +465,116 @@ show_main_menu() {
     log_success "Configuration saved"
 }
 
+# ===== MODULE: SETUP USERS =====
+04_setup_users() {
+    log_info "=== Setting Up Users ==="
+    
+    if state_exists "USERS_CONFIGURED"; then
+        log_info "Users already configured, skipping..."
+        return 0
+    fi
+    
+    local wp_user=$(load_state "WP_USER")
+    local wp_root=$(load_state "WP_ROOT")
+    
+    # Create WordPress system user
+    if ! id "$wp_user" &>/dev/null; then
+        log_info "Creating WordPress user: $wp_user"
+        sudo useradd -r -s /bin/bash -d "/home/$wp_user" -m "$wp_user"
+    fi
+    
+    # Create backup user
+    if ! id "$BACKUP_USER" &>/dev/null; then
+        log_info "Creating backup user: $BACKUP_USER"
+        sudo useradd -r -s /bin/bash -d "/home/$BACKUP_USER" -m "$BACKUP_USER"
+    fi
+    
+    # Setup backup SSH access
+    sudo mkdir -p "/home/$BACKUP_USER/.ssh"
+    echo "$BACKUP_SSH_KEY" | sudo tee "/home/$BACKUP_USER/.ssh/authorized_keys" > /dev/null
+    
+    # Prompt for additional backup keys
+    while confirm_action "Add another backup worker SSH key?" N; do
+        read -p "Paste SSH public key: " extra_key
+        echo "$extra_key" | sudo tee -a "/home/$BACKUP_USER/.ssh/authorized_keys" > /dev/null
+    done
+    
+    # Set permissions
+    sudo chmod 700 "/home/$BACKUP_USER/.ssh"
+    sudo chmod 600 "/home/$BACKUP_USER/.ssh/authorized_keys"
+    sudo chown -R "$BACKUP_USER:$BACKUP_USER" "/home/$BACKUP_USER"
+    
+    # Add backup user to WordPress group for read access
+    sudo usermod -a -G "$wp_user" "$BACKUP_USER"
+    
+    # Create web root
+    sudo mkdir -p "$wp_root"
+    sudo chown "$wp_user:$wp_user" "$wp_root"
+    sudo chmod 750 "$wp_root"
+    
+    save_state "USERS_CONFIGURED" "true"
+    log_success "Users configured successfully"
+}
+
+# ===== MODULE: CONFIGURE MARIADB =====
+05_configure_mariadb() {
+    log_info "=== Configuring MariaDB ==="
+    
+    if state_exists "MARIADB_CONFIGURED"; then
+        log_info "MariaDB already configured, skipping..."
+        return 0
+    fi
+    
+    local db_name=$(load_state "DB_NAME")
+    local db_user=$(load_state "DB_USER")
+    local db_pass=$(load_state "DB_PASS")
+    
+    # Secure MariaDB installation
+    log_info "Securing MariaDB installation..."
+    sudo mysql -e "UPDATE mysql.user SET Password=PASSWORD('$(generate_secure_password)') WHERE User='root';"
+    sudo mysql -e "DELETE FROM mysql.user WHERE User='';"
+    sudo mysql -e "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');"
+    sudo mysql -e "DROP DATABASE IF EXISTS test;"
+    sudo mysql -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';"
+    
+    # Create WordPress database and user
+    log_info "Creating WordPress database: $db_name"
+    sudo mysql <<EOF
+CREATE DATABASE IF NOT EXISTS $db_name DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '$db_user'@'localhost' IDENTIFIED BY '$db_pass';
+GRANT ALL PRIVILEGES ON $db_name.* TO '$db_user'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+    
+    # Optimize MariaDB settings for WordPress
+    sudo tee /etc/mysql/mariadb.conf.d/60-wordpress.cnf > /dev/null <<EOF
+[mysqld]
+# WordPress optimizations
+max_connections = 100
+key_buffer_size = 32M
+max_allowed_packet = 64M
+table_open_cache = 256
+sort_buffer_size = 2M
+read_buffer_size = 2M
+read_rnd_buffer_size = 4M
+myisam_sort_buffer_size = 32M
+thread_cache_size = 8
+query_cache_size = 32M
+query_cache_limit = 2M
+
+# InnoDB settings
+innodb_buffer_pool_size = 128M
+innodb_log_file_size = 32M
+innodb_flush_log_at_trx_commit = 2
+innodb_flush_method = O_DIRECT
+EOF
+    
+    sudo systemctl restart mariadb
+    
+    save_state "MARIADB_CONFIGURED" "true"
+    log_success "MariaDB configured successfully"
+}
+
 # ===== MAIN EXECUTION =====
 main() {
     log_info "WordPress Setup Script v${SCRIPT_VERSION} started"
@@ -482,6 +595,8 @@ main() {
                 log_info "Starting fresh installation..."
                 02_install_dependencies
                 03_interactive_config
+                04_setup_users
+                05_configure_mariadb
                 # Continue with more modules...
             fi
             ;;
@@ -490,11 +605,15 @@ main() {
                 log_info "Starting new installation..."
                 02_install_dependencies
                 03_interactive_config
+                04_setup_users
+                05_configure_mariadb
                 # mode_fresh_install
             else
                 log_info "Starting import..."
                 02_install_dependencies
                 03_interactive_config
+                04_setup_users
+                05_configure_mariadb
                 # mode_import_site
             fi
             ;;
@@ -505,6 +624,8 @@ main() {
             else
                 log_info "Starting restore..."
                 02_install_dependencies
+                04_setup_users
+                05_configure_mariadb
                 # mode_restore_backup
             fi
             ;;
