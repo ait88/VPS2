@@ -24,93 +24,87 @@ install_packages() {
     info "Selected PHP version: $php_version"
     save_state "PHP_VERSION" "$php_version"
     
-    # Core packages array
-    local packages=(
-        # Web server
-        nginx
-        nginx-extras
-        
-        # Database
-        mariadb-server
-        mariadb-client
-        
-        # PHP and extensions
-        "php${php_version}-fpm"
-        "php${php_version}-mysql"
-        "php${php_version}-xml"
-        "php${php_version}-curl" 
-        "php${php_version}-gd"
-        "php${php_version}-mbstring"
-        "php${php_version}-zip"
-        "php${php_version}-imagick"
-        "php${php_version}-intl"
-        "php${php_version}-bcmath"
-        "php${php_version}-soap"
-        "php${php_version}-opcache"
+    # Install packages in groups for better error handling
+    show_progress 3 8 "Installing core packages"
+    install_package_group "Core packages" \
+        nginx nginx-extras mariadb-server mariadb-client
+    
+    show_progress 4 8 "Installing PHP packages"
+    install_package_group "PHP packages" \
+        "php${php_version}-fpm" \
+        "php${php_version}-mysql" \
+        "php${php_version}-xml" \
+        "php${php_version}-curl" \
+        "php${php_version}-mbstring" \
+        "php${php_version}-zip" \
+        "php${php_version}-imagick" \
+        "php${php_version}-intl" \
+        "php${php_version}-bcmath" \
+        "php${php_version}-soap" \
+        "php${php_version}-opcache" \
         "php${php_version}-cli"
-        
-        # Security
-        fail2ban
-        certbot
-        python3-certbot-nginx
-        ufw
-        
-        # Tools
-        curl
-        wget
-        unzip
-        rsync
-        git
-        htop
-        iotop
-        ncdu
-        
-        # Build tools (for some WP plugins)
-        build-essential
-        software-properties-common
-    )
     
-    # Install packages
-    show_progress 3 8 "Installing packages (this may take a while)"
-    local failed_packages=()
-    
-    for package in "${packages[@]}"; do
-        if ! dpkg -l | grep -q "^ii  $package "; then
-            debug "Installing $package..."
-            if ! sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$package" &>/dev/null; then
-                failed_packages+=("$package")
-            fi
+    # Try alternative for gd if it failed
+    if ! install_package_group "PHP Graphics" "php${php_version}-gd"; then
+        warning "php${php_version}-gd failed, trying alternatives..."
+        # Sometimes it's available as separate package or already included
+        if ! sudo apt-get install -y "php-gd" &>/dev/null; then
+            warning "GD extension not available - image processing may be limited"
         fi
-    done
-    
-    # Report any failures
-    if [ ${#failed_packages[@]} -gt 0 ]; then
-        warning "Some packages failed to install: ${failed_packages[*]}"
-        warning "This may not be critical, continuing..."
     fi
     
+    show_progress 5 8 "Installing security packages"
+    install_package_group "Security packages" \
+        fail2ban certbot python3-certbot-nginx ufw
+    
+    show_progress 6 8 "Installing tools"
+    install_package_group "Tools" \
+        curl wget unzip rsync git htop iotop ncdu \
+        build-essential software-properties-common
+    
     # Install WP-CLI
-    show_progress 4 8 "Installing WP-CLI"
+    show_progress 7 8 "Installing WP-CLI"
     install_wp_cli
     
-    # Configure PHP
-    show_progress 5 8 "Configuring PHP defaults"
+    # Configure and verify
     configure_php_defaults "$php_version"
-    
-    # Start and enable services
-    show_progress 6 8 "Enabling services"
     enable_services "$php_version"
-    
-    # Install additional tools
-    show_progress 7 8 "Installing additional tools"
     install_additional_tools
     
-    # Verify installation
     show_progress 8 8 "Verifying installation"
     verify_installation "$php_version"
     
     save_state "PACKAGES_INSTALLED" "true"
     success "✓ All packages installed successfully"
+}
+
+install_package_group() {
+    local group_name="$1"
+    shift
+    local packages=("$@")
+    
+    debug "Installing $group_name: ${packages[*]}"
+    
+    # Try to install all packages at once
+    if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}" &>/dev/null; then
+        debug "$group_name installed successfully"
+        return 0
+    else
+        warning "$group_name installation failed, trying individually..."
+        
+        # Install individually to identify specific failures
+        local failed_packages=()
+        for package in "${packages[@]}"; do
+            if ! sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$package" &>/dev/null; then
+                failed_packages+=("$package")
+            fi
+        done
+        
+        if [ ${#failed_packages[@]} -gt 0 ]; then
+            warning "Failed packages in $group_name: ${failed_packages[*]}"
+            return 1
+        fi
+    fi
 }
 
 detect_php_version() {
@@ -202,17 +196,35 @@ enable_services() {
     )
     
     for service in "${services[@]}"; do
-        if systemctl list-unit-files | grep -q "^${service}.service"; then
+        # Check if service exists before trying to enable it
+        if systemctl list-unit-files "${service}.service" &>/dev/null; then
             sudo systemctl enable "$service" &>/dev/null || true
             
             # Start if not running
             if ! sudo systemctl is-active --quiet "$service"; then
+                info "Starting $service..."
                 sudo systemctl start "$service" || {
                     warning "Failed to start $service"
                 }
+            else
+                debug "Service already running: $service"
             fi
         else
-            debug "Service not found: $service"
+            # Try alternative service names
+            case $service in
+                "mariadb")
+                    # Some systems use mysql.service instead
+                    if systemctl list-unit-files "mysql.service" &>/dev/null; then
+                        sudo systemctl enable mysql &>/dev/null || true
+                        sudo systemctl start mysql || warning "Failed to start mysql"
+                    else
+                        warning "Neither mariadb nor mysql service found"
+                    fi
+                    ;;
+                *)
+                    warning "Service not found: $service"
+                    ;;
+            esac
         fi
     done
 }
@@ -240,13 +252,21 @@ verify_installation() {
     local services=(
         "nginx"
         "php${php_version}-fpm" 
-        "mariadb"
+        "mariadb:mysql"  # mariadb or mysql
     )
     
-    for service in "${services[@]}"; do
+    for service_spec in "${services[@]}"; do
+        local service="${service_spec%%:*}"
+        local alt_service="${service_spec#*:}"
+        
         if ! sudo systemctl is-active --quiet "$service"; then
-            error "Service not running: $service"
-            all_good=false
+            # Try alternative if specified
+            if [ "$alt_service" != "$service" ] && sudo systemctl is-active --quiet "$alt_service"; then
+                debug "Service running as alternative: $alt_service"
+            else
+                error "Service not running: $service"
+                all_good=false
+            fi
         fi
     done
     
@@ -265,9 +285,9 @@ verify_installation() {
         fi
     done
     
-    # Check PHP modules
+    # Check PHP modules with correct detection
     local required_modules=(
-        "mysql"
+        "mysqli"  # More specific than just "mysql"
         "gd"
         "mbstring"
         "xml"
@@ -276,7 +296,19 @@ verify_installation() {
     
     for module in "${required_modules[@]}"; do
         if ! php -m | grep -qi "^${module}$"; then
-            warning "PHP module not loaded: $module"
+            # Check alternative names
+            case $module in
+                "mysqli")
+                    if php -m | grep -qi "^mysql$\|^pdo_mysql$"; then
+                        debug "MySQL support found via alternative module"
+                    else
+                        warning "MySQL PHP module not found - install php${php_version}-mysql"
+                    fi
+                    ;;
+                *)
+                    warning "PHP module not loaded: $module"
+                    ;;
+            esac
         fi
     done
     
