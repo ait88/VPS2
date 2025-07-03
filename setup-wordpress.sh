@@ -18,7 +18,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
 # ===== LOGGING FUNCTIONS =====
 log() {
@@ -333,21 +333,143 @@ show_main_menu() {
     return $choice
 }
 
+# ===== MODULE: INSTALL DEPENDENCIES =====
+02_install_dependencies() {
+    log_info "=== Installing Dependencies ==="
+    
+    if state_exists "DEPENDENCIES_INSTALLED"; then
+        log_info "Dependencies already installed, skipping..."
+        return 0
+    fi
+    
+    # Update package lists
+    log_info "Updating package lists..."
+    apt-get update -qq || { log_error "Failed to update package lists"; exit 1; }
+    
+    # Detect PHP version
+    local php_version="8.2"
+    if command -v php &>/dev/null; then
+        php_version=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')
+        log_info "Detected PHP $php_version"
+    fi
+    
+    # Core packages
+    local packages=(
+        # Web stack
+        nginx
+        mariadb-server
+        "php${php_version}-fpm"
+        "php${php_version}-mysql"
+        "php${php_version}-xml"
+        "php${php_version}-curl"
+        "php${php_version}-gd"
+        "php${php_version}-mbstring"
+        "php${php_version}-zip"
+        "php${php_version}-imagick"
+        "php${php_version}-intl"
+        "php${php_version}-bcmath"
+        # Tools
+        curl wget unzip rsync
+        # Security
+        fail2ban certbot python3-certbot-nginx
+        # Monitoring
+        htop iotop
+    )
+    
+    log_info "Installing packages..."
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}" || {
+        log_error "Package installation failed"
+        exit 1
+    }
+    
+    # Install WP-CLI
+    if ! command -v wp &>/dev/null; then
+        log_info "Installing WP-CLI..."
+        curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+        chmod +x wp-cli.phar
+        mv wp-cli.phar /usr/local/bin/wp
+    fi
+    
+    # Verify critical services
+    for service in nginx "php${php_version}-fpm" mariadb; do
+        systemctl is-enabled --quiet $service || systemctl enable $service
+        systemctl is-active --quiet $service || systemctl start $service
+    done
+    
+    save_state "DEPENDENCIES_INSTALLED" "true"
+    save_state "PHP_VERSION" "$php_version"
+    log_success "Dependencies installed successfully"
+}
+
+# ===== MODULE: INTERACTIVE CONFIGURATION =====
+03_interactive_config() {
+    log_info "=== Configuration Setup ==="
+    
+    # WordPress Configuration
+    echo -e "\n${BLUE}WordPress Configuration${NC}"
+    
+    read -p "WordPress system username [wpuser]: " WP_USER
+    WP_USER="${WP_USER:-wpuser}"
+    
+    read -p "WordPress root directory [/var/www/wordpress]: " WP_ROOT
+    WP_ROOT="${WP_ROOT:-/var/www/wordpress}"
+    
+    # Domain Configuration
+    while true; do
+        read -p "Primary domain (e.g., example.com): " DOMAIN
+        if validate_domain "$DOMAIN"; then
+            break
+        else
+            log_error "Invalid domain format"
+        fi
+    done
+    
+    read -p "Include www alias? [Y/n]: " INCLUDE_WWW
+    INCLUDE_WWW="${INCLUDE_WWW:-Y}"
+    
+    read -p "Admin email [$WP_USER@$DOMAIN]: " ADMIN_EMAIL
+    ADMIN_EMAIL="${ADMIN_EMAIL:-$WP_USER@$DOMAIN}"
+    
+    # Database Configuration
+    echo -e "\n${BLUE}Database Configuration${NC}"
+    
+    read -p "Database name [wp_${DOMAIN//[.-]/_}]: " DB_NAME
+    DB_NAME="${DB_NAME:-wp_${DOMAIN//[.-]/_}}"
+    
+    read -p "Database user [${DB_NAME}_user]: " DB_USER
+    DB_USER="${DB_USER:-${DB_NAME}_user}"
+    
+    DB_PASS=$(generate_secure_password)
+    echo "Generated database password: ${GREEN}${DB_PASS}${NC}"
+    
+    # Save all configuration
+    local configs=(
+        "WP_USER:$WP_USER"
+        "WP_ROOT:$WP_ROOT"
+        "DOMAIN:$DOMAIN"
+        "INCLUDE_WWW:$INCLUDE_WWW"
+        "ADMIN_EMAIL:$ADMIN_EMAIL"
+        "DB_NAME:$DB_NAME"
+        "DB_USER:$DB_USER"
+        "DB_PASS:$DB_PASS"
+    )
+    
+    for config in "${configs[@]}"; do
+        IFS=: read -r key value <<< "$config"
+        save_state "$key" "$value"
+    done
+    
+    log_success "Configuration saved"
+}
+
 # ===== MAIN EXECUTION =====
 main() {
-    # Initialize
     log_info "WordPress Setup Script v${SCRIPT_VERSION} started"
     
-    # Check for updates first
     check_and_update_script "$@"
-    
-    # Run preflight checks
     01_preflight_checks
-    
-    # Check for existing installation
     check_existing_installation
     
-    # Show menu and handle selection
     show_main_menu
     local choice=$?
     
@@ -358,15 +480,21 @@ main() {
                 # mode_reconfigure
             else
                 log_info "Starting fresh installation..."
-                # mode_fresh_install
+                02_install_dependencies
+                03_interactive_config
+                # Continue with more modules...
             fi
             ;;
         2)
             if [ "$(load_state "EXISTING_WP_FOUND")" = "true" ]; then
                 log_info "Starting new installation..."
+                02_install_dependencies
+                03_interactive_config
                 # mode_fresh_install
             else
                 log_info "Starting import..."
+                02_install_dependencies
+                03_interactive_config
                 # mode_import_site
             fi
             ;;
@@ -376,6 +504,7 @@ main() {
                 # mode_reset
             else
                 log_info "Starting restore..."
+                02_install_dependencies
                 # mode_restore_backup
             fi
             ;;
