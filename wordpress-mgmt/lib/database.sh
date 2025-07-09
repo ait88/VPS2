@@ -515,7 +515,7 @@ EOF
     local cron_job="0 3 * * * /home/$backup_user/backup-database.sh >/dev/null 2>&1"
     
     # Create temporary file for cron job
-    local temp_cron="/tmp/cron_$backup_user_$$"
+    local temp_cron="/tmp/cron_${backup_user}_$$"
     
     # Get existing cron jobs (if any)
     sudo crontab -u "$backup_user" -l 2>/dev/null > "$temp_cron" || true
