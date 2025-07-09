@@ -370,16 +370,16 @@ import_wordpress_site() {
         configure_interactive
     fi
     
-    # Check if database is set up
-    if ! state_exists "DATABASE_CONFIGURED"; then
-        info "Setting up database for import..."
-        setup_database
-    fi
-    
-    # Check if users are configured
+    # Check if users are configured (MUST come before database setup)
     if ! state_exists "USERS_CONFIGURED"; then
         info "Setting up users for import..."
         setup_users
+    fi
+    
+    # Check if database is set up (AFTER users exist)
+    if ! state_exists "DATABASE_CONFIGURED"; then
+        info "Setting up database for import..."
+        setup_database
     fi
     
     echo "Import source options:"
