@@ -1,39 +1,41 @@
+# VPS2 - WordPress & VPS Management Tools
 
-## Update `.bashrc` with single command.
-   
-   ```bash
-   curl -sL https://raw.githubusercontent.com/ait88/VPS/main/.bashrc -o ~/.bashrc && exec bash
-   ```
+Modular scripts for WordPress deployment and VPS management.
 
-## Usage
+## Quick Start
 
-1. SSH into your VPS as root:
-   ```bash
-   ssh root@your-vps-ip
-   ```
-2. Download the setup script:
-   ```bash
-   curl -sL https://raw.githubusercontent.com/ait88/VPS/main/vps-setup.sh -o vps-setup.sh
-   ```
-3. Make the script executable:
-   ```bash
-   chmod +x vps-setup.sh
-   ```
-4. Run the script with sudo:
-   ```bash
-   sudo ./vps-setup.sh
-   ```
-5. Follow the prompts to set up your username, allowed IP, and GitHub username.
+### WordPress Installation
+```bash
+curl -sL https://raw.githubusercontent.com/ait88/VPS2/main/setup-wordpress.sh -o setup-wordpress.sh
+chmod +x setup-wordpress.sh
+sudo ./setup-wordpress.sh
+```
 
-## Post-Installation
+### VPS Initial Setup
+```bash
+curl -sL https://raw.githubusercontent.com/ait88/VPS2/main/vps-setup.sh -o vps-setup.sh
+chmod +x vps-setup.sh
+sudo ./vps-setup.sh
+```
 
-- Log in with your new user:
-  ```bash
-  ssh sysadmin@your-vps-ip
-  ```
-- Verify that SSH key authentication is working.
-- Ensure your firewall (UFW) is properly configured.
-- Check Fail2Ban status:
-  ```bash
-  sudo systemctl status fail2ban
-  ```
+### WordPress Security Audit
+```bash
+curl -sL https://raw.githubusercontent.com/ait88/VPS2/main/wp-security-audit.sh -o wp-security-audit.sh
+chmod +x wp-security-audit.sh
+./wp-security-audit.sh
+```
+
+## Tools
+
+- **setup-wordpress.sh** - Complete WordPress installation with security hardening
+- **vps-setup.sh** - VPS initialization and security configuration  
+- **wp-security-audit.sh** - WordPress security assessment tool
+
+## Shell Customizations
+
+For `.bashrc` updates and shell customizations, see the [original VPS repository](https://github.com/ait88/VPS).
+
+```bash
+# Update .bashrc from original repo
+curl -sL https://raw.githubusercontent.com/ait88/VPS/main/.bashrc -o ~/.bashrc && exec bash
+```
