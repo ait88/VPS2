@@ -384,12 +384,45 @@ import_from_url() {
     local temp_dir="$WP_MGMT_DIR/tmp"
     mkdir -p "$temp_dir"
     
-    local temp_file="$temp_dir/wp-import-$(date +%s).tar.gz"
-    info "Downloading backup to $temp_file..."
+    # Generate filename from URL
+    local filename=$(basename "$backup_url")
+    local temp_file="$temp_dir/$filename"
     
-    if curl -fL "$backup_url" -o "$temp_file"; then
-        import_from_archive "$temp_file"
+    # Check if file already exists
+    if [ -f "$temp_file" ]; then
+        local file_age=$(($(date +%s) - $(stat -c %Y "$temp_file")))
+        local file_size=$(du -h "$temp_file" | cut -f1)
+        
+        echo "Found existing download: $filename ($file_size, $(($file_age / 3600)) hours old)"
+        
+        if confirm "Use existing file instead of re-downloading?" Y; then
+            info "Using existing file: $temp_file"
+        else
+            info "Downloading fresh copy..."
+            download_backup_file "$backup_url" "$temp_file"
+        fi
+    else
+        info "Downloading backup to $temp_file..."
+        download_backup_file "$backup_url" "$temp_file"
+    fi
+    
+    import_from_archive "$temp_file"
+    
+    # Ask if user wants to keep the download
+    if confirm "Keep downloaded backup file for future use?" N; then
+        info "Backup saved at: $temp_file"
+    else
         rm -f "$temp_file"
+        info "Downloaded file cleaned up"
+    fi
+}
+
+download_backup_file() {
+    local url="$1"
+    local output_file="$2"
+    
+    if curl -fL --progress-bar "$url" -o "$output_file"; then
+        success "Download completed"
     else
         error "Failed to download backup from URL"
         return 1
@@ -491,17 +524,12 @@ validate_backup_structure() {
         errors+=("wp-config.php not found")
     fi
     
-    # Check for database dump (various possible names)
+    # Check for database dump using pattern matching
     local db_file=""
-    for name in "wp-db_dump.sql.gz" "db.sql.gz" "database.sql.gz" "wp-db_dump.sql" "db.sql"; do
-        if [ -f "$extract_dir/$name" ]; then
-            db_file="$extract_dir/$name"
-            break
-        fi
-    done
+    db_file=$(find "$extract_dir" -maxdepth 1 -name "*.sql*" -type f | head -1)
     
     if [ -z "$db_file" ]; then
-        errors+=("Database dump not found (expected wp-db_dump.sql.gz or similar)")
+        errors+=("Database dump not found (expected *.sql or *.sql.gz)")
     fi
     
     # Check for wp-content (directory or archive)
@@ -522,7 +550,7 @@ validate_backup_structure() {
         return 1
     fi
     
-    info "✓ Backup structure valid (wp-content: $wp_content_source)"
+    info "✓ Backup structure valid (wp-content: $wp_content_source, database: $(basename "$db_file"))"
     return 0
 }
 
@@ -534,25 +562,24 @@ process_database_import() {
     
     info "Importing database..."
     
-    # Find database dump file
-    local db_file=""
-    for name in "wp-db_dump.sql.gz" "db.sql.gz" "database.sql.gz" "wp-db_dump.sql" "db.sql"; do
-        if [ -f "$extract_dir/$name" ]; then
-            db_file="$extract_dir/$name"
-            break
-        fi
-    done
+    # Find database dump file using pattern
+    local db_file=$(find "$extract_dir" -maxdepth 1 -name "*.sql*" -type f | head -1)
     
     if [ -z "$db_file" ]; then
         error "Database dump file not found"
         return 1
     fi
     
+    info "Found database file: $(basename "$db_file")"
+    
     # Import based on file type
     if [[ "$db_file" =~ \.gz$ ]]; then
-        gunzip -c "$db_file" | mysql -u"$db_user" -p"$db_pass" "$db_name"
+        gunzip -c "$db_file" | mysql -u "$db_user" --password="$db_pass" "$db_name"
+    elif [[ "$db_file" =~ \.sql$ ]]; then
+        mysql -u "$db_user" --password="$db_pass" "$db_name" < "$db_file"
     else
-        mysql -u"$db_user" -p"$db_pass" "$db_name" < "$db_file"
+        error "Unsupported database file format: $db_file"
+        return 1
     fi
     
     if [ $? -eq 0 ]; then
