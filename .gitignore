@@ -1,0 +1,104 @@
+# === SECURITY & SENSITIVE DATA ===
+# Database credentials and configuration
+wp-config.php
+**/wp-config.php
+*.sql
+*.sql.gz
+database.sql*
+wp-db_dump.*
+
+# State files containing credentials
+**/setup_state
+**/setup_state.*
+setup_state
+setup_state.*
+
+# Log files that may contain sensitive data
+*.log
+**/logs/
+**/tmp/
+**/temp/
+
+# Backup files
+*.backup
+*.bak
+*~
+
+# SSH keys and certificates
+*.pem
+*.key
+*.crt
+*.csr
+id_rsa*
+id_ed25519*
+authorized_keys
+known_hosts
+
+# Environment files
+.env
+.env.*
+*.env
+
+# API keys and tokens
+**/credentials
+**/secrets
+**/.anthropic
+**/.claude
+**/.api-keys
+
+# MariaDB/MySQL files
+my.cnf
+.my.cnf
+mysql.cnf
+
+# === WORDPRESS SPECIFIC ===
+# WordPress installation directories
+**/wordpress/
+**/wp-content/uploads/
+**/wp-content/cache/
+**/wp-content/backup*/
+**/wp-content/wflogs/
+
+# === DEVELOPMENT & SYSTEM ===
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Temporary files
+/tmp/
+*.tmp
+*.temp
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === CLAUDE CODE SPECIFIC ===
+# Claude Code session data
+.claude/
+**/.claude-session*
+**/claude-session*
+
+# Archive files (backups)
+*.tar.gz
+*.zip
+*.7z
+*.rar
+wp-backup.*
+backup-*
