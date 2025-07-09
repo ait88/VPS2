@@ -554,6 +554,22 @@ validate_backup_structure() {
     return 0
 }
 
+check_database_setup() {
+    local db_name=$(load_state "DB_NAME")
+    local db_user=$(load_state "DB_USER")
+    local db_pass=$(load_state "DB_PASS")
+    
+    # Test database connection
+    if ! mysql -u "$db_user" --password="$db_pass" -e "SELECT 1;" >/dev/null 2>&1; then
+        error "Cannot connect to database with user: $db_user"
+        error "Run fresh installation first to set up database"
+        return 1
+    fi
+    
+    info "Database connection verified"
+    return 0
+}
+
 process_database_import() {
     local extract_dir=$1
     local db_name=$(load_state "DB_NAME")
@@ -572,11 +588,21 @@ process_database_import() {
     
     info "Found database file: $(basename "$db_file")"
     
-    # Import based on file type
+    # Ensure database exists before importing
+    info "Creating database if it doesn't exist..."
+    mysql -u "$db_user" --password="$db_pass" -e "CREATE DATABASE IF NOT EXISTS \`$db_name\`;"
+    
+    if [ $? -ne 0 ]; then
+        error "Failed to create/access database: $db_name"
+        return 1
+    fi
+    
+    # Import based on file type with explicit database selection
+    info "Importing data into database: $db_name"
     if [[ "$db_file" =~ \.gz$ ]]; then
-        gunzip -c "$db_file" | mysql -u "$db_user" --password="$db_pass" "$db_name"
+        gunzip -c "$db_file" | mysql -u "$db_user" --password="$db_pass" --database="$db_name"
     elif [[ "$db_file" =~ \.sql$ ]]; then
-        mysql -u "$db_user" --password="$db_pass" "$db_name" < "$db_file"
+        mysql -u "$db_user" --password="$db_pass" --database="$db_name" < "$db_file"
     else
         error "Unsupported database file format: $db_file"
         return 1
