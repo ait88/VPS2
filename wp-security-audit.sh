@@ -6,7 +6,7 @@
 
 # Set up script variables
 SCRIPT_VERSION="1.3"
-GITHUB_URL="https://raw.githubusercontent.com/ait88/VPS/refs/heads/main/wp-security-audit.sh"
+GITHUB_URL="https://raw.githubusercontent.com/ait88/VPS2/refs/heads/main/wp-security-audit.sh"
 FIX_ISSUES=false
 FORCE_UPDATE=false
 

@@ -1,14 +1,14 @@
 #!/bin/bash
 # setup-wordpress.sh - Modular WordPress Installation Manager
 # Version: 3.0.0
-# GitHub: https://github.com/ait88/VPS
+# GitHub: https://github.com/ait88/VPS2
 
 set -euo pipefail
 
 # ===== CONFIGURATION =====
 SCRIPT_VERSION="3.0.0"
-SCRIPT_URL="https://raw.githubusercontent.com/ait88/VPS/main/setup-wordpress.sh"
-BASE_URL="https://raw.githubusercontent.com/ait88/VPS/main/wordpress-mgmt"
+SCRIPT_URL="https://raw.githubusercontent.com/ait88/VPS2/main/setup-wordpress.sh"
+BASE_URL="https://raw.githubusercontent.com/ait88/VPS2/main/wordpress-mgmt"
 
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

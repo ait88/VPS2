@@ -98,7 +98,7 @@ done
 
 # Fetch and apply custom Bash profile from GitHub
 echo "Fetching custom Bash profile..."
-curl -sL https://raw.githubusercontent.com/ait88/VPS/main/.bashrc -o /home/$SYSADMIN_USER/.bashrc
+curl -sL https://raw.githubusercontent.com/ait88/VPS2/main/.bashrc -o /home/$SYSADMIN_USER/.bashrc
 chown $SYSADMIN_USER:$SYSADMIN_USER /home/$SYSADMIN_USER/.bashrc
 chmod 644 /home/$SYSADMIN_USER/.bashrc
 
