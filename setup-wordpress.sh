@@ -231,6 +231,147 @@ mode_restore_backup() {
     restore_from_backup
 }
 
+# ===== NUKE ALL FUNCTION =====
+nuke_all() {
+    info "=== Remove WordPress - Complete System Reset ==="
+    
+    # Load required modules
+    for module in utils.sh database.sh; do
+        load_module "$module"
+    done
+    
+    echo
+    echo -e "\033[1;31m⚠️  DANGER ZONE ⚠️\033[0m"
+    echo "This will COMPLETELY REMOVE:"
+    echo "• All MariaDB databases and users"
+    echo "• All WordPress files and directories"
+    echo "• All system users (wp-user, php-user, backup-user, etc.)"
+    echo "• All configuration files and SSL certificates"
+    echo "• Complete setup_state (all saved configuration)"
+    echo
+    echo -e "\033[1;31mTHIS CANNOT BE UNDONE!\033[0m"
+    echo
+    echo "Type 'I know what I'm doing, Nuke it all!' to proceed:"
+    read -p "> " nuke_confirm
+    
+    if [ "$nuke_confirm" = "I know what I'm doing, Nuke it all!" ]; then
+        nuke_complete_system
+    else
+        echo "Confirmation failed. Aborting."
+        return 1
+    fi
+}
+
+nuke_complete_system() {
+    info "🔥 NUKING complete WordPress system..."
+    
+    # Backup current configuration for reference
+    local domain=$(load_state "DOMAIN")
+    local admin_email=$(load_state "ADMIN_EMAIL")
+    local wp_root=$(load_state "WP_ROOT")
+    
+    # Stop all services
+    info "Stopping services..."
+    sudo systemctl stop nginx 2>/dev/null || true
+    sudo systemctl stop php8.2-fpm 2>/dev/null || true
+    sudo systemctl stop redis-server 2>/dev/null || true
+    sudo systemctl stop mariadb 2>/dev/null || true
+    
+    # Remove MariaDB completely
+    info "Removing MariaDB..."
+    sudo systemctl stop mariadb || true
+    sudo systemctl disable mariadb || true
+    sudo apt-get remove --purge -y mariadb-server mariadb-client mariadb-common mysql-common 2>/dev/null || true
+    sudo apt-get autoremove -y 2>/dev/null || true
+    sudo rm -rf /var/lib/mysql
+    sudo rm -rf /etc/mysql
+    sudo rm -f /etc/init.d/mysql
+    sudo rm -f /etc/logrotate.d/mysql-server
+    
+    # Remove WordPress files
+    if [ -n "$wp_root" ] && [ -d "$wp_root" ]; then
+        info "Removing WordPress files at $wp_root..."
+        sudo rm -rf "$wp_root"
+    fi
+    
+    # Remove common WordPress directories
+    sudo rm -rf /var/www/wordpress 2>/dev/null || true
+    sudo rm -rf /var/www/html/wordpress 2>/dev/null || true
+    
+    # Remove system users
+    info "Removing system users..."
+    for user in wp-user php-user wp-backup redis backup-user; do
+        if id "$user" &>/dev/null; then
+            info "Removing user: $user"
+            sudo userdel -r "$user" 2>/dev/null || true
+        fi
+    done
+    
+    # Remove SSL certificates
+    info "Removing SSL certificates..."
+    if [ -n "$domain" ]; then
+        sudo rm -rf "/etc/letsencrypt/live/$domain" 2>/dev/null || true
+        sudo rm -rf "/etc/letsencrypt/archive/$domain" 2>/dev/null || true
+        sudo rm -rf "/etc/letsencrypt/renewal/$domain.conf" 2>/dev/null || true
+    fi
+    
+    # Remove Nginx configuration
+    info "Removing Nginx configuration..."
+    sudo rm -f /etc/nginx/sites-available/wordpress* 2>/dev/null || true
+    sudo rm -f /etc/nginx/sites-enabled/wordpress* 2>/dev/null || true
+    if [ -n "$domain" ]; then
+        sudo rm -f "/etc/nginx/sites-available/$domain" 2>/dev/null || true
+        sudo rm -f "/etc/nginx/sites-enabled/$domain" 2>/dev/null || true
+    fi
+    
+    # Remove PHP-FPM pools
+    info "Removing PHP-FPM pools..."
+    sudo rm -f /etc/php/8.2/fpm/pool.d/wordpress.conf 2>/dev/null || true
+    
+    # Remove fail2ban jails
+    info "Removing security configurations..."
+    sudo rm -f /etc/fail2ban/jail.d/wordpress.conf 2>/dev/null || true
+    
+    # Remove backup directories
+    info "Removing backup directories..."
+    sudo rm -rf /home/*/backups 2>/dev/null || true
+    sudo rm -rf /home/*/db-backups 2>/dev/null || true
+    
+    # Remove user credentials
+    info "Removing user credentials..."
+    rm -f "$HOME/.mysql_root"
+    rm -f "$HOME/.my.cnf"
+    
+    # Remove setup state completely
+    info "Removing all configuration state..."
+    rm -f "$STATE_FILE"
+    
+    # Remove logs
+    info "Removing logs..."
+    rm -f "$LOG_FILE"
+    
+    # Restart remaining services
+    info "Restarting services..."
+    sudo systemctl restart nginx 2>/dev/null || true
+    sudo systemctl restart fail2ban 2>/dev/null || true
+    
+    echo
+    success "✓ Complete system nuke successful!"
+    echo
+    if [ -n "$domain" ]; then
+        info "💡 Previous configuration reference:"
+        info "   Domain: $domain"
+        info "   Email: $admin_email"
+        info "   WordPress Root: $wp_root"
+        echo
+    fi
+    info "🚀 System is now clean and ready for fresh WordPress installation"
+    info "🚀 Run this script again to begin fresh setup"
+    echo
+    
+    exit 0
+}
+
 # ===== MAIN MENU =====
 show_menu() {
     echo
@@ -243,7 +384,11 @@ show_menu() {
     echo "4) Update modules"
     echo "5) Exit"
     echo
-    read -p "Enter your choice [1-5]: " choice
+    echo "Maintenance Options:"
+    echo "9) Remove WordPress - Nuke all databases, files, configs and setup_state"
+    echo "   (Prepares environment for fresh installation or import)"
+    echo
+    read -p "Enter your choice [1-5, 9]: " choice
     echo
     
     case $choice in
@@ -262,6 +407,7 @@ show_menu() {
             info "Exiting..."
             exit 0
             ;;
+        9) nuke_all ;;
         *) 
             error "Invalid choice: $choice"
             show_menu
