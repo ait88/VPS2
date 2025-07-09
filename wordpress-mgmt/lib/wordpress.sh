@@ -393,6 +393,9 @@ import_wordpress_site() {
         2) import_from_directory ;;
         *) error "Invalid choice"; return 1 ;;
     esac
+    
+    # After successful import, complete the WordPress infrastructure setup
+    complete_wordpress_setup
 }
 
 import_from_url() {
@@ -713,10 +716,51 @@ restore_from_backup() {
     if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#backups[@]} ]; then
         local selected_backup="${backups[$((choice-1))]}"
         import_from_archive "$selected_backup"
+        
+        # After successful restore, complete the WordPress infrastructure setup
+        complete_wordpress_setup
     else
         error "Invalid selection"
         return 1
     fi
+}
+
+# Complete WordPress infrastructure setup (shared by import and restore)
+complete_wordpress_setup() {
+    info "=== Completing WordPress Infrastructure Setup ==="
+    
+    # Install required packages if not already installed
+    if ! state_exists "PACKAGES_INSTALLED"; then
+        info "Installing required packages..."
+        install_packages
+    fi
+    
+    # Configure Nginx web server
+    if ! state_exists "NGINX_CONFIGURED"; then
+        info "Configuring Nginx web server..."
+        configure_nginx
+    fi
+    
+    # Setup SSL certificates
+    if ! state_exists "SSL_CONFIGURED"; then
+        info "Setting up SSL certificates..."
+        setup_ssl
+    fi
+    
+    # Apply security hardening
+    if ! state_exists "SECURITY_CONFIGURED"; then
+        info "Applying security hardening..."
+        apply_security
+    fi
+    
+    # Setup backup system
+    if ! state_exists "BACKUP_CONFIGURED"; then
+        info "Setting up backup system..."
+        setup_backup_system
+    fi
+    
+    success "WordPress infrastructure setup completed successfully!"
+    show_completion_summary
 }
 
 debug "WordPress module loaded successfully"
