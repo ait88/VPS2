@@ -35,6 +35,160 @@ setup_database() {
     success "✓ Database configured successfully"
 }
 
+handle_mariadb_auth_failure() {
+    error "MariaDB authentication failed with both debian.cnf and socket authentication"
+    echo
+    warning "This usually means there's a conflicting MariaDB installation with different credentials."
+    echo "The saved root password in setup_state doesn't match the current MariaDB root password."
+    echo
+    echo "Options to resolve this:"
+    echo "1) Try to fix the authentication manually"
+    echo "2) Reset MariaDB root password (requires manual intervention)"
+    echo "3) NUKE IT! - Completely remove MariaDB and start fresh"
+    echo
+    echo -e "\033[1;31mWARNING: Option 3 will completely remove MariaDB and ALL existing databases!\033[0m"
+    echo
+    
+    while true; do
+        read -p "Enter your choice [1-3]: " auth_choice
+        case $auth_choice in
+            1)
+                echo "Please fix MariaDB authentication manually and run the script again."
+                echo "You can try: sudo mysql_secure_installation"
+                return 1
+                ;;
+            2)
+                echo "Please reset the MariaDB root password manually:"
+                echo "1. sudo systemctl stop mariadb"
+                echo "2. sudo mysqld_safe --skip-grant-tables &"
+                echo "3. mysql -u root"
+                echo "4. ALTER USER 'root'@'localhost' IDENTIFIED BY 'new_password';"
+                echo "5. FLUSH PRIVILEGES;"
+                echo "6. exit"
+                echo "7. sudo pkill mysqld"
+                echo "8. sudo systemctl start mariadb"
+                echo "Then update the DB_ROOT_PASS in wordpress-mgmt/setup_state"
+                return 1
+                ;;
+            3)
+                echo
+                echo -e "\033[1;31m⚠️  DANGER ZONE ⚠️\033[0m"
+                echo "This will completely remove MariaDB and ALL databases!"
+                echo "Type 'I know what I'm doing, Nuke it!' to proceed:"
+                read -p "> " nuke_confirm
+                if [ "$nuke_confirm" = "I know what I'm doing, Nuke it!" ]; then
+                    nuke_mariadb_installation
+                    return $?
+                else
+                    echo "Confirmation failed. Aborting."
+                    return 1
+                fi
+                ;;
+            *)
+                echo "Invalid choice. Please enter 1, 2, or 3."
+                ;;
+        esac
+    done
+}
+
+nuke_mariadb_installation() {
+    info "🔥 NUKING MariaDB installation..."
+    
+    # Stop MariaDB service
+    info "Stopping MariaDB service..."
+    sudo systemctl stop mariadb || true
+    sudo systemctl disable mariadb || true
+    
+    # Remove MariaDB packages
+    info "Removing MariaDB packages..."
+    sudo apt-get remove --purge -y mariadb-server mariadb-client mariadb-common mysql-common || true
+    sudo apt-get autoremove -y || true
+    
+    # Remove MariaDB data directory
+    info "Removing MariaDB data directory..."
+    sudo rm -rf /var/lib/mysql
+    
+    # Remove configuration files
+    info "Removing configuration files..."
+    sudo rm -rf /etc/mysql
+    sudo rm -f /etc/init.d/mysql
+    sudo rm -f /etc/logrotate.d/mysql-server
+    
+    # Remove user credentials
+    info "Removing user credentials..."
+    rm -f "$HOME/.mysql_root"
+    rm -f "$HOME/.my.cnf"
+    
+    # Clear database state
+    info "Clearing database state..."
+    remove_state "DATABASE_CONFIGURED"
+    remove_state "DB_ROOT_PASS"
+    
+    # Optional: Remove WordPress files and users if they exist
+    local wp_root=$(load_state "WP_ROOT")
+    if [ -n "$wp_root" ] && [ -d "$wp_root" ]; then
+        echo
+        if confirm "Also remove WordPress files at $wp_root?" N; then
+            info "Removing WordPress files..."
+            sudo rm -rf "$wp_root"
+            
+            # Remove WordPress-related users
+            local wp_user=$(load_state "WP_USER" "wp-user")
+            local php_user=$(load_state "PHP_USER" "php-user")
+            local backup_user=$(load_state "BACKUP_USER" "wp-backup")
+            
+            for user in "$wp_user" "$php_user" "$backup_user"; do
+                if id "$user" &>/dev/null; then
+                    info "Removing user: $user"
+                    sudo userdel -r "$user" 2>/dev/null || true
+                fi
+            done
+            
+            # Clear WordPress-related state
+            remove_state "USERS_CONFIGURED"
+            remove_state "WORDPRESS_INSTALLED"
+            remove_state "NGINX_CONFIGURED"
+            remove_state "SSL_CONFIGURED"
+            remove_state "SECURITY_CONFIGURED"
+            remove_state "BACKUP_CONFIGURED"
+        fi
+    fi
+    
+    # Reinstall MariaDB
+    info "Reinstalling MariaDB..."
+    sudo apt-get update
+    sudo apt-get install -y mariadb-server mariadb-client
+    
+    # Start MariaDB service
+    info "Starting MariaDB service..."
+    sudo systemctl start mariadb
+    sudo systemctl enable mariadb
+    
+    # Wait for MariaDB to be ready
+    info "Waiting for MariaDB to be ready..."
+    local timeout=30
+    local count=0
+    while ! sudo mysqladmin ping --silent && [ $count -lt $timeout ]; do
+        sleep 1
+        count=$((count + 1))
+    done
+    
+    if [ $count -eq $timeout ]; then
+        error "MariaDB failed to start after reinstallation"
+        return 1
+    fi
+    
+    success "✓ MariaDB has been nuked and reinstalled!"
+    info "You can now continue with the installation process."
+    
+    # Generate new root password and secure the installation
+    local root_pass=$(generate_password 32)
+    save_state "DB_ROOT_PASS" "$root_pass"
+    
+    # Now secure the fresh installation
+    secure_mariadb_installation
+}
+
 secure_mariadb_installation() {
     info "Securing MariaDB..."
     
@@ -80,7 +234,7 @@ EOF
     then
         # Fallback: try connecting as root with socket authentication
         warning "Debian config failed, trying socket authentication..."
-        sudo mysql -u root <<EOF
+        if ! sudo mysql -u root <<EOF
 -- Set root password
 ALTER USER 'root'@'localhost' IDENTIFIED BY '$root_pass';
 
@@ -97,6 +251,11 @@ DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
 -- Reload privilege tables
 FLUSH PRIVILEGES;
 EOF
+        then
+            # Both methods failed - handle gracefully
+            handle_mariadb_auth_failure
+            return $?
+        fi
     fi
     
     # Save root credentials securely

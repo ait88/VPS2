@@ -144,6 +144,14 @@ state_exists() {
     [ -f "$STATE_FILE" ] && grep -q "^${key}=" "$STATE_FILE" 2>/dev/null
 }
 
+remove_state() {
+    local key=$1
+    if [ -f "$STATE_FILE" ]; then
+        sed -i "/^${key}=/d" "$STATE_FILE"
+        debug "State removed: ${key}"
+    fi
+}
+
 # ===== SELF-UPDATE =====
 check_update() {
     info "Checking for updates..."
