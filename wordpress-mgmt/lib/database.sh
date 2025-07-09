@@ -154,6 +154,28 @@ nuke_mariadb_installation() {
         fi
     fi
     
+    # Offer complete reset option
+    echo
+    if confirm "COMPLETE RESET: Clear ALL configuration and start completely fresh?" N; then
+        info "🔥 COMPLETE RESET: Clearing all configuration..."
+        
+        # Backup current domain config in case user wants to reuse
+        local domain=$(load_state "DOMAIN")
+        local admin_email=$(load_state "ADMIN_EMAIL")
+        
+        # Remove the entire state file
+        rm -f "$STATE_FILE"
+        
+        info "✓ All configuration cleared - script will start completely fresh"
+        if [ -n "$domain" ]; then
+            info "💡 TIP: Your previous domain was '$domain' and email was '$admin_email'"
+            info "💡 You can reuse these when configuring fresh, or choose new ones"
+        fi
+        
+        success "✓ Complete reset successful - restart the script to begin fresh setup"
+        exit 0
+    fi
+    
     # Reinstall MariaDB
     info "Reinstalling MariaDB..."
     sudo apt-get update
