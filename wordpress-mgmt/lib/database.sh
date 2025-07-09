@@ -45,8 +45,22 @@ secure_mariadb_installation() {
         save_state "DB_ROOT_PASS" "$root_pass"
     fi
     
-    # Secure installation equivalent
-    sudo mysql --defaults-file=/etc/mysql/debian.cnf <<EOF
+    # Check if MariaDB is already secured by testing root access
+    if mysql -u root -p"$root_pass" -e "SELECT 1;" &>/dev/null; then
+        info "MariaDB already secured with saved root password"
+        # Update credentials file
+        local creds_file="$HOME/.mysql_root"
+        cat > "$creds_file" <<EOF
+[client]
+user=root
+password=$root_pass
+EOF
+        chmod 600 "$creds_file"
+        return 0
+    fi
+    
+    # Try to secure MariaDB - first try with debian.cnf, then fallback to socket auth
+    if ! sudo mysql --defaults-file=/etc/mysql/debian.cnf <<EOF
 -- Set root password
 ALTER USER 'root'@'localhost' IDENTIFIED BY '$root_pass';
 
@@ -63,6 +77,27 @@ DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
 -- Reload privilege tables
 FLUSH PRIVILEGES;
 EOF
+    then
+        # Fallback: try connecting as root with socket authentication
+        warning "Debian config failed, trying socket authentication..."
+        sudo mysql -u root <<EOF
+-- Set root password
+ALTER USER 'root'@'localhost' IDENTIFIED BY '$root_pass';
+
+-- Remove anonymous users
+DELETE FROM mysql.user WHERE User='';
+
+-- Disable remote root login
+DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+
+-- Remove test database
+DROP DATABASE IF EXISTS test;
+DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+
+-- Reload privilege tables
+FLUSH PRIVILEGES;
+EOF
+    fi
     
     # Save root credentials securely
     local creds_file="$HOME/.mysql_root"
@@ -83,8 +118,11 @@ create_wordpress_database() {
     
     info "Creating database: $db_name"
     
-    # Use debian maintenance account for initial setup
-    sudo mysql --defaults-file=/etc/mysql/debian.cnf <<EOF
+    # Use appropriate credentials for database creation
+    local root_pass=$(load_state "DB_ROOT_PASS")
+    
+    # Try root with saved password first, fallback to debian.cnf
+    if ! mysql -u root -p"$root_pass" <<EOF
 -- Create database with proper charset
 CREATE DATABASE IF NOT EXISTS \`$db_name\`
     DEFAULT CHARACTER SET utf8mb4
@@ -102,6 +140,27 @@ GRANT USAGE ON *.* TO '$db_user'@'localhost' REQUIRE NONE WITH MAX_QUERIES_PER_H
 
 FLUSH PRIVILEGES;
 EOF
+    then
+        # Fallback to debian.cnf
+        sudo mysql --defaults-file=/etc/mysql/debian.cnf <<EOF
+-- Create database with proper charset
+CREATE DATABASE IF NOT EXISTS \`$db_name\`
+    DEFAULT CHARACTER SET utf8mb4
+    DEFAULT COLLATE utf8mb4_unicode_520_ci;
+
+-- Create user (drop if exists for idempotency)
+DROP USER IF EXISTS '$db_user'@'localhost';
+CREATE USER '$db_user'@'localhost' IDENTIFIED BY '$db_pass';
+
+-- Grant privileges
+GRANT ALL PRIVILEGES ON \`$db_name\`.* TO '$db_user'@'localhost';
+
+-- Additional security - limit to localhost only
+GRANT USAGE ON *.* TO '$db_user'@'localhost' REQUIRE NONE WITH MAX_QUERIES_PER_HOUR 0 MAX_CONNECTIONS_PER_HOUR 0 MAX_UPDATES_PER_HOUR 0 MAX_USER_CONNECTIONS 0;
+
+FLUSH PRIVILEGES;
+EOF
+    fi
     
     # Test connection
     if mysql -u"$db_user" -p"$db_pass" -e "SELECT 1;" &>/dev/null; then
