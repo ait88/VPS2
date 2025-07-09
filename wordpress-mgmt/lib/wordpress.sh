@@ -364,6 +364,24 @@ EOF
 import_wordpress_site() {
     info "=== Import WordPress Site ==="
     
+    # Check if basic configuration exists
+    if ! state_exists "CONFIG_COMPLETED"; then
+        info "Configuration required for import..."
+        configure_interactive
+    fi
+    
+    # Check if database is set up
+    if ! state_exists "DATABASE_CONFIGURED"; then
+        info "Setting up database for import..."
+        setup_database
+    fi
+    
+    # Check if users are configured
+    if ! state_exists "USERS_CONFIGURED"; then
+        info "Setting up users for import..."
+        setup_users
+    fi
+    
     echo "Import source options:"
     echo "1) Remote URL"
     echo "2) Local directory"
