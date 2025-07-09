@@ -89,6 +89,13 @@ Thumbs.db
 *.swo
 *~
 
+# Symbolic links (symlinks)
+# These are system-specific and shouldn't be tracked
+etc-nginx
+sysadmin_home
+var-log
+var-www
+
 # === CLAUDE CODE SPECIFIC ===
 # Claude Code session data
 .claude/
