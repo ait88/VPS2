@@ -365,16 +365,14 @@ import_wordpress_site() {
     info "=== Import WordPress Site ==="
     
     echo "Import source options:"
-    echo "1) Upload archive file"
-    echo "2) Remote URL"
-    echo "3) Local directory"
+    echo "1) Remote URL"
+    echo "2) Local directory"
     
-    read -p "Select import source [1-3]: " import_choice
+    read -p "Select import source [1-2]: " import_choice
     
     case $import_choice in
-        1) import_from_upload ;;
-        2) import_from_url ;;
-        3) import_from_directory ;;
+        1) import_from_url ;;
+        2) import_from_directory ;;
         *) error "Invalid choice"; return 1 ;;
     esac
 }
@@ -382,16 +380,31 @@ import_wordpress_site() {
 import_from_url() {
     read -p "Enter URL of backup archive: " backup_url
     
-    local temp_file="/tmp/wp-import-$(date +%s).tar.gz"
-    info "Downloading backup..."
+    # Create temp directory
+    local temp_dir="$WP_MGMT_DIR/tmp"
+    mkdir -p "$temp_dir"
+    
+    local temp_file="$temp_dir/wp-import-$(date +%s).tar.gz"
+    info "Downloading backup to $temp_file..."
     
     if curl -fL "$backup_url" -o "$temp_file"; then
         import_from_archive "$temp_file"
         rm -f "$temp_file"
     else
-        error "Failed to download backup"
+        error "Failed to download backup from URL"
         return 1
     fi
+}
+
+import_from_directory() {
+    read -p "Enter path to backup archive: " backup_path
+    
+    if [ ! -f "$backup_path" ]; then
+        error "Archive file not found: $backup_path"
+        return 1
+    fi
+    
+    import_from_archive "$backup_path"
 }
 
 import_from_archive() {
@@ -406,35 +419,48 @@ import_from_archive() {
     
     info "Extracting archive..."
     mkdir -p "$temp_dir"
-    tar -xzf "$archive_file" -C "$temp_dir"
     
-    # Verify backup structure
-    if [ ! -f "$temp_dir/wp-config.php" ] || [ ! -f "$temp_dir/db.sql" ]; then
-        error "Invalid backup format. Expected wp-config.php and db.sql"
+    # Extract main archive
+    if ! tar -xzf "$archive_file" -C "$temp_dir"; then
+        error "Failed to extract archive"
         rm -rf "$temp_dir"
         return 1
     fi
     
-    # Import database
-    info "Importing database..."
-    local db_name=$(load_state "DB_NAME")
-    local db_user=$(load_state "DB_USER")
-    local db_pass=$(load_state "DB_PASS")
-    
-    if [ -f "$temp_dir/db.sql.gz" ]; then
-        gunzip -c "$temp_dir/db.sql.gz" | mysql -u"$db_user" -p"$db_pass" "$db_name"
+    # Find the extracted content (might be in subdirectory)
+    local extract_dir
+    if [ -f "$temp_dir/wp-config.php" ]; then
+        extract_dir="$temp_dir"
     else
-        mysql -u"$db_user" -p"$db_pass" "$db_name" < "$temp_dir/db.sql"
+        # Look for subdirectory containing wp-config.php
+        extract_dir=$(find "$temp_dir" -name "wp-config.php" -type f -exec dirname {} \; | head -1)
+        if [ -z "$extract_dir" ]; then
+            error "wp-config.php not found in archive"
+            rm -rf "$temp_dir"
+            return 1
+        fi
     fi
     
-    # Download WordPress core
-    download_wordpress "latest"
-    extract_wordpress
+    # Validate backup structure
+    validate_backup_structure "$extract_dir"
+    if [ $? -ne 0 ]; then
+        error "Invalid backup format"
+        rm -rf "$temp_dir"
+        return 1
+    fi
     
-    # Restore wp-content
-    info "Restoring wp-content..."
-    sudo rm -rf "$wp_root/wp-content"
-    sudo cp -a "$temp_dir/wp-content" "$wp_root/"
+    # Process database dump
+    process_database_import "$extract_dir"
+    
+    # Process wp-content
+    process_wp_content_import "$extract_dir" "$wp_root"
+    
+    # Download WordPress core if needed
+    if [ ! -f "$wp_root/wp-login.php" ]; then
+        info "Downloading WordPress core..."
+        download_wordpress "latest"
+        extract_wordpress
+    fi
     
     # Update wp-config.php with new credentials
     configure_wordpress
@@ -443,14 +469,7 @@ import_from_archive() {
     set_wordpress_permissions
     
     # Update URLs if domain changed
-    local old_domain=$(grep -oP "define\s*\(\s*'WP_HOME'\s*,\s*'https?://\K[^']+(?=')" "$temp_dir/wp-config.php" || true)
-    local new_domain=$(load_state "DOMAIN")
-    
-    if [ -n "$old_domain" ] && [ "$old_domain" != "$new_domain" ]; then
-        info "Updating URLs from $old_domain to $new_domain..."
-        local wp_user=$(load_state "WP_USER")
-        sudo -u "$wp_user" wp search-replace "$old_domain" "$new_domain" --all-tables --path="$wp_root"
-    fi
+    update_site_urls "$extract_dir"
     
     # Cleanup
     rm -rf "$temp_dir"
@@ -459,6 +478,139 @@ import_from_archive() {
     save_state "WP_INSTALL_METHOD" "import"
     
     success "WordPress site imported successfully"
+}
+
+validate_backup_structure() {
+    local extract_dir=$1
+    local errors=()
+    
+    info "Validating backup structure..."
+    
+    # Check for required files
+    if [ ! -f "$extract_dir/wp-config.php" ]; then
+        errors+=("wp-config.php not found")
+    fi
+    
+    # Check for database dump (various possible names)
+    local db_file=""
+    for name in "wp-db_dump.sql.gz" "db.sql.gz" "database.sql.gz" "wp-db_dump.sql" "db.sql"; do
+        if [ -f "$extract_dir/$name" ]; then
+            db_file="$extract_dir/$name"
+            break
+        fi
+    done
+    
+    if [ -z "$db_file" ]; then
+        errors+=("Database dump not found (expected wp-db_dump.sql.gz or similar)")
+    fi
+    
+    # Check for wp-content (directory or archive)
+    local wp_content_source=""
+    if [ -d "$extract_dir/wp-content" ]; then
+        wp_content_source="directory"
+    elif [ -f "$extract_dir/wp-content.tar.gz" ]; then
+        wp_content_source="archive"
+    else
+        errors+=("wp-content not found (expected directory or wp-content.tar.gz)")
+    fi
+    
+    if [ ${#errors[@]} -gt 0 ]; then
+        error "Backup validation failed:"
+        for err in "${errors[@]}"; do
+            error "  - $err"
+        done
+        return 1
+    fi
+    
+    info "✓ Backup structure valid (wp-content: $wp_content_source)"
+    return 0
+}
+
+process_database_import() {
+    local extract_dir=$1
+    local db_name=$(load_state "DB_NAME")
+    local db_user=$(load_state "DB_USER")
+    local db_pass=$(load_state "DB_PASS")
+    
+    info "Importing database..."
+    
+    # Find database dump file
+    local db_file=""
+    for name in "wp-db_dump.sql.gz" "db.sql.gz" "database.sql.gz" "wp-db_dump.sql" "db.sql"; do
+        if [ -f "$extract_dir/$name" ]; then
+            db_file="$extract_dir/$name"
+            break
+        fi
+    done
+    
+    if [ -z "$db_file" ]; then
+        error "Database dump file not found"
+        return 1
+    fi
+    
+    # Import based on file type
+    if [[ "$db_file" =~ \.gz$ ]]; then
+        gunzip -c "$db_file" | mysql -u"$db_user" -p"$db_pass" "$db_name"
+    else
+        mysql -u"$db_user" -p"$db_pass" "$db_name" < "$db_file"
+    fi
+    
+    if [ $? -eq 0 ]; then
+        success "Database imported successfully"
+    else
+        error "Database import failed"
+        return 1
+    fi
+}
+
+process_wp_content_import() {
+    local extract_dir=$1
+    local wp_root=$2
+    
+    info "Importing wp-content..."
+    
+    # Remove existing wp-content
+    sudo rm -rf "$wp_root/wp-content"
+    
+    if [ -d "$extract_dir/wp-content" ]; then
+        # wp-content is a directory
+        sudo cp -a "$extract_dir/wp-content" "$wp_root/"
+    elif [ -f "$extract_dir/wp-content.tar.gz" ]; then
+        # wp-content is compressed
+        cd "$wp_root"
+        sudo tar -xzf "$extract_dir/wp-content.tar.gz"
+    else
+        error "wp-content not found in backup"
+        return 1
+    fi
+    
+    success "wp-content imported successfully"
+}
+
+update_site_urls() {
+    local extract_dir=$1
+    local new_domain=$(load_state "DOMAIN")
+    local wp_root=$(load_state "WP_ROOT")
+    local wp_user=$(load_state "WP_USER")
+    
+    # Try to extract old domain from wp-config.php
+    local old_domain=""
+    if [ -f "$extract_dir/wp-config.php" ]; then
+        old_domain=$(grep -oP "define\s*\(\s*['\"]WP_HOME['\"],\s*['\"]https?://\K[^'\"]+(?=['\"])" "$extract_dir/wp-config.php" || true)
+    fi
+    
+    if [ -n "$old_domain" ] && [ "$old_domain" != "$new_domain" ]; then
+        info "Updating URLs from $old_domain to $new_domain..."
+        
+        # Use WP-CLI to update URLs
+        sudo -u "$wp_user" wp search-replace "$old_domain" "$new_domain" \
+            --all-tables \
+            --path="$wp_root" || {
+            warning "URL replacement failed - you may need to update URLs manually"
+        }
+    else
+        info "No URL updates needed"
+    fi
 }
 
 # Restore from backup
