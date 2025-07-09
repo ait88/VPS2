@@ -87,18 +87,18 @@ sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/g' /etc/ssh/ssh
 systemctl restart sshd
 
 # Set up firewall
-echo "Configuring  firewall..."
- --force reset
- default deny incoming
- default allow outgoing
+echo "Configuring ufw firewall..."
+ufw --force reset
+ufw default deny incoming
+ufw default allow outgoing
 for ip in "${ALLOWED_IPS[@]}"; do
-     allow from $ip to any port $SSH_PORT proto tcp
+    ufw allow from $ip to any port $SSH_PORT proto tcp
 done
- enable &&  reload
+ufw enable && ufw reload
 
 # Fetch and apply custom Bash profile from GitHub
 echo "Fetching custom Bash profile..."
-curl -sL https://raw.githubusercontent.com/ait88/VPS2/main/.bashrc -o /home/$SYSADMIN_USER/.bashrc
+curl -sL https://raw.githubusercontent.com/ait88/VPS/main/.bashrc -o /home/$SYSADMIN_USER/.bashrc
 chown $SYSADMIN_USER:$SYSADMIN_USER /home/$SYSADMIN_USER/.bashrc
 chmod 644 /home/$SYSADMIN_USER/.bashrc
 
