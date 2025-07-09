@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# Development script - work in progress
 # WordPress Security Audit Script
 # This script gathers information about WordPress installations to help identify security issues
 # Run this script from the directory containing your WordPress installation

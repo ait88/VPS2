@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# Development script - work in progress
 # Prompt for user input
 read -p "Enter your preferred username: " SYSADMIN_USER
 ALLOWED_IPS=()
