@@ -27,9 +27,11 @@ setup_database() {
     
     show_progress 4 5 "Setting up database backups"
     setup_database_backups "$db_name" "$db_user" "$db_pass"
+    debug "Database backup setup completed"
     
     show_progress 5 5 "Verifying database setup"
     verify_database_setup "$db_name" "$db_user" "$db_pass"
+    debug "Database verification completed"
     
     save_state "DATABASE_CONFIGURED" "true"
     success "✓ Database configured successfully"
@@ -451,16 +453,21 @@ setup_database_backups() {
     local db_pass=$3
     
     info "Setting up database backup system..."
+    debug "Starting database backup setup for user: $db_user"
     
     local backup_user=$(load_state "BACKUP_USER" "wp-backup")
     local backup_dir="/home/$backup_user/db-backups"
+    debug "Using backup user: $backup_user, backup dir: $backup_dir"
     
     # Create backup directory
+    debug "Creating backup directory..."
     sudo mkdir -p "$backup_dir"
     sudo chown "$backup_user:$backup_user" "$backup_dir"
     sudo chmod 750 "$backup_dir"
+    debug "Backup directory created and configured"
     
     # Create backup credentials file
+    debug "Creating backup credentials file..."
     local backup_creds="/home/$backup_user/.my.cnf"
     sudo tee "$backup_creds" >/dev/null <<EOF
 [mysqldump]
@@ -470,8 +477,10 @@ EOF
     
     sudo chown "$backup_user:$backup_user" "$backup_creds"
     sudo chmod 600 "$backup_creds"
+    debug "Backup credentials file created"
     
     # Create backup script
+    debug "Creating backup script..."
     local backup_script="/home/$backup_user/backup-database.sh"
     sudo tee "$backup_script" >/dev/null <<'EOF'
 #!/bin/bash
@@ -499,10 +508,32 @@ EOF
     
     sudo chown "$backup_user:$backup_user" "$backup_script"
     sudo chmod 750 "$backup_script"
+    debug "Backup script created and configured"
     
     # Create cron job for daily backups
+    info "Setting up daily backup cron job..."
     local cron_job="0 3 * * * /home/$backup_user/backup-database.sh >/dev/null 2>&1"
-    (sudo crontab -u "$backup_user" -l 2>/dev/null; echo "$cron_job") | sudo crontab -u "$backup_user" -
+    
+    # Create temporary file for cron job
+    local temp_cron="/tmp/cron_$backup_user_$$"
+    
+    # Get existing cron jobs (if any)
+    sudo crontab -u "$backup_user" -l 2>/dev/null > "$temp_cron" || true
+    
+    # Add new cron job if it doesn't exist
+    if ! grep -q "backup-database.sh" "$temp_cron" 2>/dev/null; then
+        echo "$cron_job" >> "$temp_cron"
+        if sudo crontab -u "$backup_user" "$temp_cron"; then
+            debug "Cron job added successfully"
+        else
+            warning "Failed to add cron job, but continuing..."
+        fi
+    else
+        debug "Cron job already exists"
+    fi
+    
+    # Clean up temporary file
+    rm -f "$temp_cron"
     
     debug "Database backup system configured"
 }
