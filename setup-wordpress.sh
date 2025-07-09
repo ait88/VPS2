@@ -214,9 +214,12 @@ mode_import_site() {
     info "=== Import Existing WordPress Site ==="
     
     # Load required modules
-    for module in utils.sh config.sh database.sh wordpress.sh; do
+    for module in utils.sh preflight.sh config.sh database.sh wordpress.sh; do
         load_module "$module"
     done
+    
+    # Run preflight checks to ensure dependencies are installed
+    run_preflight_checks
     
     import_wordpress_site
 }
@@ -224,9 +227,12 @@ mode_import_site() {
 mode_restore_backup() {
     info "=== Restore from Backup ==="
     
-    for module in utils.sh backup.sh database.sh; do
+    for module in utils.sh preflight.sh backup.sh database.sh; do
         load_module "$module"
     done
+    
+    # Run preflight checks to ensure dependencies are installed
+    run_preflight_checks
     
     restore_from_backup
 }

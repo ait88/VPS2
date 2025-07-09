@@ -91,6 +91,7 @@ check_required_commands() {
     )
     
     local missing_commands=()
+    local missing_services=()
     
     for cmd in "${required_commands[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
@@ -98,8 +99,21 @@ check_required_commands() {
         fi
     done
     
-    if [ ${#missing_commands[@]} -gt 0 ]; then
-        warning "Missing required commands: ${missing_commands[*]}"
+    # Check for MariaDB server service
+    if ! sudo systemctl status mariadb &>/dev/null; then
+        if ! dpkg -l | grep -q mariadb-server; then
+            missing_services+=("mariadb-server")
+        fi
+    fi
+    
+    if [ ${#missing_commands[@]} -gt 0 ] || [ ${#missing_services[@]} -gt 0 ]; then
+        if [ ${#missing_commands[@]} -gt 0 ]; then
+            warning "Missing required commands: ${missing_commands[*]}"
+        fi
+        if [ ${#missing_services[@]} -gt 0 ]; then
+            warning "Missing required services: ${missing_services[*]}"
+        fi
+        
         if confirm "Install missing packages?"; then
             local packages=""
             for cmd in "${missing_commands[@]}"; do
@@ -111,12 +125,42 @@ check_required_commands() {
                 esac
             done
             
+            # Add MariaDB server if missing
+            for service in "${missing_services[@]}"; do
+                case $service in
+                    mariadb-server) packages="$packages mariadb-server mariadb-client" ;;
+                esac
+            done
+            
             if [ -n "$packages" ]; then
+                info "Installing packages:$packages"
                 sudo apt-get update -qq
                 sudo apt-get install -y $packages
+                
+                # Start and enable MariaDB if it was installed
+                if [[ "$packages" =~ mariadb-server ]]; then
+                    info "Starting MariaDB service..."
+                    sudo systemctl start mariadb
+                    sudo systemctl enable mariadb
+                    
+                    # Wait for MariaDB to be ready
+                    local timeout=30
+                    local count=0
+                    while ! sudo mysqladmin ping --silent && [ $count -lt $timeout ]; do
+                        sleep 1
+                        count=$((count + 1))
+                    done
+                    
+                    if [ $count -eq $timeout ]; then
+                        error "MariaDB failed to start after installation"
+                        exit 1
+                    else
+                        success "✓ MariaDB installed and started"
+                    fi
+                fi
             fi
         else
-            error "Required commands missing"
+            error "Required packages missing"
             exit 1
         fi
     fi
