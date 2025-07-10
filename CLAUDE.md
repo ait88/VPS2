@@ -26,6 +26,32 @@ sudo ./setup-wordpress.sh
 ./wp-security-audit.sh
 ```
 
+### Menu System
+The main setup script now includes organized menus:
+
+**Installation Options (1-4):**
+- Fresh WordPress installation
+- Import existing WordPress site  
+- Restore from backup
+- Update modules
+
+**Management Menus (6-9):**
+- Utils Menu: Permissions fixer, domain change, nuke system
+- Monitoring Menu: (Future: resource/uptime/security monitoring)
+- Maintenance Menu: (Future: updates, optimization, cleanup)
+
+### Utils Menu Features
+```bash
+# Access utils menu
+./setup-wordpress.sh
+# Choose option 6
+
+# Available utils:
+# 1) Fix/Enforce Standard Permissions
+# 2) Change Primary Domain  
+# 3) Remove WordPress (Nuke System)
+```
+
 ### Development and Testing
 ```bash
 # Test individual library modules

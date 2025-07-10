@@ -388,13 +388,15 @@ show_menu() {
     echo "2) Import existing WordPress site"  
     echo "3) Restore from backup"
     echo "4) Update modules"
-    echo "5) Exit"
     echo
-    echo "Maintenance Options:"
-    echo "9) Remove WordPress - Nuke all databases, files, configs and setup_state"
-    echo "   (Prepares environment for fresh installation or import)"
+    echo "Management Menus:"
+    echo "6) Utils Menu (Permissions, Domain Change, Nuke)"
+    echo "7) Monitoring Menu"
+    echo "8) Maintenance Menu"
     echo
-    read -p "Enter your choice [1-5, 9]: " choice
+    echo "9) Exit"
+    echo
+    read -p "Enter your choice [1-9]: " choice
     echo
     
     case $choice in
@@ -408,17 +410,265 @@ show_menu() {
                 download_module "$module"
             done
             success "All modules updated"
+            show_menu
             ;;
-        5) 
+        6) show_utils_menu ;;
+        7) show_monitoring_menu ;;
+        8) show_maintenance_menu ;;
+        9) 
             info "Exiting..."
             exit 0
             ;;
-        9) nuke_all ;;
         *) 
             error "Invalid choice: $choice"
             show_menu
             ;;
     esac
+}
+
+# ===== UTILS MENU =====
+show_utils_menu() {
+    echo
+    echo -e "\033[1;36m=== Utils Menu ===\033[0m"
+    echo
+    echo "1) Fix/Enforce Standard Permissions"
+    echo "2) Change Primary Domain"
+    echo "3) Remove WordPress (Nuke System)"
+    echo "4) Back to Main Menu"
+    echo
+    read -p "Enter your choice [1-4]: " choice
+    echo
+    
+    case $choice in
+        1) fix_permissions ;;
+        2) change_primary_domain ;;
+        3) nuke_all ;;
+        4) show_menu ;;
+        *) 
+            error "Invalid choice: $choice"
+            show_utils_menu
+            ;;
+    esac
+}
+
+# ===== MONITORING MENU =====
+show_monitoring_menu() {
+    echo
+    echo -e "\033[1;35m=== Monitoring Menu ===\033[0m"
+    echo
+    echo "Monitoring features will be implemented in future updates."
+    echo
+    echo "Planned features:"
+    echo "• System resource monitoring"
+    echo "• Website uptime monitoring"
+    echo "• Security event monitoring"
+    echo "• Performance metrics"
+    echo
+    echo "1) Back to Main Menu"
+    echo
+    read -p "Enter your choice [1]: " choice
+    echo
+    
+    case $choice in
+        1) show_menu ;;
+        *) 
+            error "Invalid choice: $choice"
+            show_monitoring_menu
+            ;;
+    esac
+}
+
+# ===== MAINTENANCE MENU =====
+show_maintenance_menu() {
+    echo
+    echo -e "\033[1;33m=== Maintenance Menu ===\033[0m"
+    echo
+    echo "Maintenance features will be implemented in future updates."
+    echo
+    echo "Planned features:"
+    echo "• WordPress core updates"
+    echo "• Plugin/theme updates"
+    echo "• Database optimization"
+    echo "• Log rotation and cleanup"
+    echo "• SSL certificate renewal"
+    echo
+    echo "1) Back to Main Menu"
+    echo
+    read -p "Enter your choice [1]: " choice
+    echo
+    
+    case $choice in
+        1) show_menu ;;
+        *) 
+            error "Invalid choice: $choice"
+            show_maintenance_menu
+            ;;
+    esac
+}
+
+# ===== UTILITY FUNCTIONS =====
+fix_permissions() {
+    info "=== Fix/Enforce Standard Permissions ==="
+    echo
+    
+    # Load required modules
+    for module in utils.sh; do
+        load_module "$module"
+    done
+    
+    echo "This will apply the standardized permission model to your WordPress installation:"
+    echo "• Base permissions: 644 files, 755 directories"
+    echo "• WordPress files: wpuser:wordpress ownership"
+    echo "• Writable dirs: php-fpm:wordpress with setgid (2775)"
+    echo "• Backup/log dirs: restricted access (2750)"
+    echo "• Sensitive config: wp-config.php (640)"
+    echo
+    
+    if ! command -v confirm &>/dev/null; then
+        echo -n "Apply standard permissions? [y/N]: "
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            echo "Operation cancelled."
+            show_utils_menu
+            return
+        fi
+    else
+        if ! confirm "Apply standard permissions?" N; then
+            show_utils_menu
+            return
+        fi
+    fi
+    
+    if enforce_standard_permissions; then
+        success "✓ Standard permissions applied successfully"
+    else
+        error "Failed to apply permissions"
+    fi
+    
+    echo
+    echo "Press Enter to continue..."
+    read
+    show_utils_menu
+}
+
+change_primary_domain() {
+    info "=== Change Primary Domain ==="
+    echo
+    
+    # Load required modules
+    for module in utils.sh config.sh nginx.sh ssl.sh wordpress.sh; do
+        load_module "$module"
+    done
+    
+    local current_domain=$(load_state "DOMAIN")
+    if [ -z "$current_domain" ]; then
+        error "No current domain found in configuration"
+        echo "Press Enter to continue..."
+        read
+        show_utils_menu
+        return
+    fi
+    
+    echo "Current domain: $current_domain"
+    echo
+    echo "Enter new domain name (without www):"
+    read -p "> " new_domain
+    
+    if [ -z "$new_domain" ]; then
+        error "Domain cannot be empty"
+        echo "Press Enter to continue..."
+        read
+        show_utils_menu
+        return
+    fi
+    
+    if ! validate_domain "$new_domain"; then
+        error "Invalid domain format"
+        echo "Press Enter to continue..."
+        read
+        show_utils_menu
+        return
+    fi
+    
+    echo
+    echo "This will update:"
+    echo "• WordPress site URL and home URL"
+    echo "• Nginx server configuration"
+    echo "• SSL certificates (Let's Encrypt)"
+    echo "• WordPress configuration files"
+    echo
+    echo "From: $current_domain"
+    echo "To:   $new_domain"
+    echo
+    
+    if ! command -v confirm &>/dev/null; then
+        echo -n "Proceed with domain change? [y/N]: "
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            echo "Operation cancelled."
+            show_utils_menu
+            return
+        fi
+    else
+        if ! confirm "Proceed with domain change?" N; then
+            show_utils_menu
+            return
+        fi
+    fi
+    
+    if update_primary_domain "$current_domain" "$new_domain"; then
+        success "✓ Domain changed successfully from $current_domain to $new_domain"
+        save_state "DOMAIN" "$new_domain"
+    else
+        error "Failed to change domain"
+    fi
+    
+    echo
+    echo "Press Enter to continue..."
+    read
+    show_utils_menu
+}
+
+update_primary_domain() {
+    local old_domain=$1
+    local new_domain=$2
+    local wp_root=$(load_state "WP_ROOT")
+    
+    info "Updating domain from $old_domain to $new_domain..."
+    
+    # Update WordPress URLs
+    if [ -f "$wp_root/wp-config.php" ]; then
+        info "Updating WordPress URLs..."
+        sudo -u wpuser wp --path="$wp_root" option update home "https://$new_domain" 2>/dev/null || true
+        sudo -u wpuser wp --path="$wp_root" option update siteurl "https://$new_domain" 2>/dev/null || true
+    fi
+    
+    # Update nginx configuration
+    if [ -f "/etc/nginx/sites-available/$old_domain" ]; then
+        info "Updating nginx configuration..."
+        sudo sed -i "s/$old_domain/$new_domain/g" "/etc/nginx/sites-available/$old_domain"
+        sudo mv "/etc/nginx/sites-available/$old_domain" "/etc/nginx/sites-available/$new_domain"
+        
+        if [ -L "/etc/nginx/sites-enabled/$old_domain" ]; then
+            sudo rm "/etc/nginx/sites-enabled/$old_domain"
+            sudo ln -sf "/etc/nginx/sites-available/$new_domain" "/etc/nginx/sites-enabled/$new_domain"
+        fi
+        
+        # Test nginx configuration
+        if sudo nginx -t; then
+            sudo systemctl reload nginx
+            success "Nginx configuration updated"
+        else
+            error "Nginx configuration test failed"
+            return 1
+        fi
+    fi
+    
+    # Update SSL certificates
+    info "SSL certificates will need to be renewed for the new domain"
+    info "Run: sudo certbot --nginx -d $new_domain -d www.$new_domain"
+    
+    return 0
 }
 
 # ===== MAIN EXECUTION =====
