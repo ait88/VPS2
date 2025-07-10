@@ -18,6 +18,7 @@ configure_nginx() {
     configure_waf_settings
     
     show_progress 3 6 "Creating virtual host"
+    ensure_temporary_ssl_certificates
     create_virtual_host
     
     show_progress 4 6 "Setting up security headers"
@@ -203,6 +204,35 @@ EOF
     sudo chmod +x /etc/cron.weekly/update-cloudflare-ips
 }
 
+ensure_temporary_ssl_certificates() {
+    local cert_path="/etc/ssl/certs/nginx-selfsigned.crt"
+    local key_path="/etc/ssl/private/nginx-selfsigned.key"
+    
+    # Check if certificates already exist
+    if [ -f "$cert_path" ] && [ -f "$key_path" ]; then
+        debug "Temporary SSL certificates already exist"
+        return 0
+    fi
+    
+    info "Creating temporary SSL certificates for nginx..."
+    
+    # Create directory if it doesn't exist
+    sudo mkdir -p /etc/ssl/private
+    sudo mkdir -p /etc/ssl/certs
+    
+    # Generate temporary self-signed certificate
+    sudo openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
+        -keyout "$key_path" \
+        -out "$cert_path" \
+        -subj "/C=US/ST=Temp/L=Temp/O=Temp/CN=localhost" >/dev/null 2>&1
+    
+    # Set proper permissions
+    sudo chmod 600 "$key_path"
+    sudo chmod 644 "$cert_path"
+    
+    debug "Temporary SSL certificates created (valid for 1 day)"
+}
+
 create_virtual_host() {
     local domain=$(load_state "DOMAIN")
     local wp_root=$(load_state "WP_ROOT")
@@ -239,7 +269,7 @@ server {
     root $wp_root;
     index index.php index.html;
     
-    # SSL configuration (placeholder - updated by ssl.sh)
+    # SSL configuration (temporary certificates - will be updated by ssl.sh)
     ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt;
     ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
     
@@ -268,6 +298,14 @@ $(generate_waf_restrictions "$waf_type")
         deny all;
     }
     
+    # Allow Let's Encrypt challenges
+    location ~ /\.well-known/acme-challenge/ {
+        allow all;
+        root $wp_root;
+        try_files \$uri =404;
+    }
+    
+    # Deny access to other dotfiles
     location ~ /\. {
         deny all;
     }
@@ -317,6 +355,30 @@ $(generate_admin_restrictions "$waf_type")
 EOF
 }
 
+generate_admin_restrictions() {
+    local waf_type=$1
+    
+    case "$waf_type" in
+        "none")
+            echo "        # No additional admin restrictions"
+            ;;
+        "cloudflare"|"cloudflare_ent")
+            echo "        # Cloudflare admin access restrictions"
+            echo "        # Admin access only through Cloudflare"
+            ;;
+        "sucuri")
+            echo "        # Sucuri admin access restrictions"
+            echo "        # Admin access only through Sucuri"
+            ;;
+        "bunkerweb")
+            echo "        # BunkerWeb admin access restrictions"
+            ;;
+        *)
+            echo "        # Custom WAF admin restrictions"
+            ;;
+    esac
+}
+
 generate_waf_restrictions() {
     local waf_type=$1
     
@@ -327,9 +389,20 @@ generate_waf_restrictions() {
         "cloudflare"|"cloudflare_ent")
             echo "    # Cloudflare IP restrictions handled by real-ip module"
             if [ "$(load_state "CF_AUTH_ORIGIN_PULLS")" = "true" ]; then
-                echo "    # Authenticated origin pulls"
-                echo "    ssl_client_certificate /etc/nginx/cloudflare-origin-pull-ca.pem;"
-                echo "    ssl_verify_client on;"
+                # Ensure CA certificate exists before configuring authentication
+                if [ ! -f "/etc/nginx/cloudflare-origin-pull-ca.pem" ]; then
+                    warning "Cloudflare Origin CA certificate missing - downloading..."
+                    ensure_cloudflare_origin_ca
+                fi
+                
+                # Only add authentication if CA certificate exists
+                if [ -f "/etc/nginx/cloudflare-origin-pull-ca.pem" ]; then
+                    echo "    # Authenticated origin pulls"
+                    echo "    ssl_client_certificate /etc/nginx/cloudflare-origin-pull-ca.pem;"
+                    echo "    ssl_verify_client on;"
+                else
+                    warning "Cloudflare Origin CA certificate unavailable - skipping authentication"
+                fi
             fi
             ;;
         *)
@@ -396,9 +469,7 @@ if ($query_string ~* "author=\d+") {
     return 403;
 }
 
-# Rate limiting zones (defined in http context)
-limit_req_zone $binary_remote_addr zone=wordpress_login:10m rate=5r/m;
-limit_req_zone $binary_remote_addr zone=wordpress_api:10m rate=30r/m;
+# Rate limiting zones are defined in main nginx.conf http context
 EOF
     
     # Add rate limiting to main nginx.conf if not exists
@@ -422,11 +493,145 @@ enable_site_config() {
 test_nginx_config() {
     info "Testing Nginx configuration..."
     
-    if sudo nginx -t; then
+    if sudo nginx -t 2>/dev/null; then
         success "Nginx configuration valid"
         restart_service "nginx"
+        return 0
+    fi
+    
+    # Capture the actual error
+    local nginx_error=$(sudo nginx -t 2>&1)
+    warning "Nginx configuration test failed:"
+    echo "$nginx_error" | grep -E "(error|emerg)" | head -3
+    
+    # Check if it's an SSL certificate issue
+    if echo "$nginx_error" | grep -q "certificate\|SSL\|ssl"; then
+        warning "SSL certificate issue detected - attempting to fix..."
+        
+        # Check for Cloudflare Origin CA certificate issue
+        if echo "$nginx_error" | grep -q "cloudflare-origin-pull-ca.pem"; then
+            warning "Missing Cloudflare Origin CA certificate - downloading..."
+            ensure_cloudflare_origin_ca
+        fi
+        
+        # Ensure temporary SSL certificates exist
+        ensure_temporary_ssl_certificates
+        
+        # Test again after fixing certificates
+        if sudo nginx -t 2>/dev/null; then
+            success "Nginx configuration fixed with certificates"
+            restart_service "nginx"
+            return 0
+        fi
+    fi
+    
+    # Last resort: check for inconsistent state and rebuild nginx config
+    warning "Attempting to rebuild nginx configuration due to persistent errors..."
+    if rebuild_nginx_config; then
+        success "Nginx configuration rebuilt successfully"
+        restart_service "nginx"
+        return 0
+    fi
+    
+    error "Nginx configuration test failed - manual intervention required"
+    return 1
+}
+
+rebuild_nginx_config() {
+    local domain=$(load_state "DOMAIN")
+    
+    if [ -z "$domain" ]; then
+        error "Domain not found in state - cannot rebuild nginx config"
+        return 1
+    fi
+    
+    warning "Rebuilding nginx configuration for $domain..."
+    
+    # Check if SSL was configured
+    if ! state_exists "SSL_CONFIGURED"; then
+        warning "SSL not configured - disabling advanced features for rebuild"
+        # Temporarily disable Cloudflare origin pulls to avoid CA certificate issues
+        local orig_cf_auth=$(load_state "CF_AUTH_ORIGIN_PULLS")
+        save_state "CF_AUTH_ORIGIN_PULLS" "false"
+        
+        # Recreate virtual host with basic configuration
+        create_virtual_host
+        
+        # Restore original setting
+        save_state "CF_AUTH_ORIGIN_PULLS" "$orig_cf_auth"
+        
+        debug "Basic nginx configuration rebuilt"
+        return 0
+    fi
+    
+    # If SSL was configured, rebuild with full features
+    create_virtual_host
+    debug "Full nginx configuration rebuilt"
+    return 0
+}
+
+ensure_cloudflare_origin_ca() {
+    local ca_path="/etc/nginx/cloudflare-origin-pull-ca.pem"
+    local ca_url="https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem"
+    
+    debug "Downloading Cloudflare Origin CA certificate..."
+    
+    # Create nginx directory if it doesn't exist
+    sudo mkdir -p /etc/nginx
+    
+    # Download CA certificate with timeout and retry
+    if sudo curl -fsSL --max-time 10 --retry 2 "$ca_url" -o "$ca_path"; then
+        sudo chmod 644 "$ca_path"
+        debug "Cloudflare Origin CA certificate downloaded successfully"
+        return 0
     else
-        error "Nginx configuration test failed"
+        warning "Failed to download Cloudflare Origin CA certificate"
+        # Clean up partial download
+        sudo rm -f "$ca_path"
+        return 1
+    fi
+}
+
+fix_acme_challenge_access() {
+    local domain=$(load_state "DOMAIN")
+    local wp_root=$(load_state "WP_ROOT")
+    local nginx_conf="/etc/nginx/sites-available/$domain"
+    
+    if [ ! -f "$nginx_conf" ]; then
+        error "Nginx configuration not found: $nginx_conf"
+        return 1
+    fi
+    
+    # Check if acme-challenge location block already exists
+    if grep -q "\.well-known/acme-challenge" "$nginx_conf"; then
+        debug "ACME challenge location block already exists"
+        return 0
+    fi
+    
+    info "Adding Let's Encrypt challenge location block to nginx config..."
+    
+    # Backup existing config
+    backup_file "$nginx_conf"
+    
+    # Add the acme-challenge location block before the general dotfile deny
+    sudo sed -i '/location ~ \/\\\. {/i\
+    # Allow Let'"'"'s Encrypt challenges\
+    location ~ /\\.well-known/acme-challenge/ {\
+        allow all;\
+        root '"$wp_root"';\
+        try_files $uri =404;\
+    }\
+    ' "$nginx_conf"
+    
+    # Test nginx configuration
+    if sudo nginx -t 2>/dev/null; then
+        info "Nginx configuration updated successfully"
+        restart_service "nginx"
+        return 0
+    else
+        error "Nginx configuration test failed - restoring backup"
+        sudo mv "${nginx_conf}.backup"* "$nginx_conf"
+        restart_service "nginx"
         return 1
     fi
 }

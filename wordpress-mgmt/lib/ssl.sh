@@ -10,6 +10,9 @@ setup_ssl() {
         return 0
     fi
     
+    # Ensure firewall allows HTTP/HTTPS for SSL challenges
+    ensure_ssl_firewall_rules
+    
     local ssl_type=$(load_state "SSL_TYPE" "letsencrypt")
     local domain=$(load_state "DOMAIN")
     
@@ -32,6 +35,47 @@ setup_ssl() {
     save_state "SSL_CONFIGURED" "true"
 }
 
+ensure_ssl_firewall_rules() {
+    info "Ensuring firewall allows HTTP/HTTPS for SSL challenges..."
+    
+    # Check if UFW is active
+    if ! sudo ufw status | grep -q "Status: active"; then
+        debug "UFW is not active - enabling with basic rules"
+        sudo ufw --force enable
+    fi
+    
+    # Check if HTTP/HTTPS rules already exist
+    local http_exists=$(sudo ufw status | grep -E "80/tcp|80 " | wc -l)
+    local https_exists=$(sudo ufw status | grep -E "443/tcp|443 " | wc -l)
+    
+    local waf_type=$(load_state "WAF_TYPE" "none")
+    
+    if [ "$waf_type" = "none" ]; then
+        # Direct access - allow from anywhere
+        if [ "$http_exists" -eq 0 ]; then
+            info "Adding HTTP (80) firewall rule..."
+            sudo ufw allow 80/tcp comment "HTTP"
+        fi
+        
+        if [ "$https_exists" -eq 0 ]; then
+            info "Adding HTTPS (443) firewall rule..."
+            sudo ufw allow 443/tcp comment "HTTPS"
+        fi
+    else
+        # WAF setup - ensure basic rules exist for SSL challenges
+        if [ "$http_exists" -eq 0 ] && [ "$https_exists" -eq 0 ]; then
+            warning "WAF configured but no HTTP/HTTPS rules found"
+            info "Adding temporary HTTP/HTTPS rules for SSL challenges..."
+            sudo ufw allow 80/tcp comment "HTTP (SSL challenges)"
+            sudo ufw allow 443/tcp comment "HTTPS (SSL challenges)"
+            
+            # Note: These will be refined by the security module later
+        fi
+    fi
+    
+    debug "Firewall rules verified for SSL setup"
+}
+
 setup_letsencrypt() {
     local domain=$1
     local include_www=$(load_state "INCLUDE_WWW" "true")
@@ -39,6 +83,9 @@ setup_letsencrypt() {
     local waf_type=$(load_state "WAF_TYPE" "none")
     
     info "Setting up Let's Encrypt SSL certificate..."
+    
+    # Ensure nginx config allows acme-challenge access
+    fix_acme_challenge_access
     
     # Prepare domain list
     local domains="-d $domain"
@@ -114,6 +161,16 @@ setup_selfsigned() {
     warning "Self-signed certificate created - browsers will show security warning"
 }
 
+cleanup_temporary_certificates() {
+    local temp_cert="/etc/ssl/certs/nginx-selfsigned.crt"
+    local temp_key="/etc/ssl/private/nginx-selfsigned.key"
+    
+    if [ -f "$temp_cert" ] && [ -f "$temp_key" ]; then
+        debug "Cleaning up temporary SSL certificates..."
+        sudo rm -f "$temp_cert" "$temp_key"
+    fi
+}
+
 update_nginx_ssl() {
     local domain=$1
     local ssl_type=$2
@@ -153,6 +210,9 @@ update_nginx_ssl() {
     if [ "$waf_type" = "none" ]; then
         sudo sed -i 's|# add_header Strict-Transport-Security|add_header Strict-Transport-Security|' /etc/nginx/snippets/security-headers.conf
     fi
+    
+    # Clean up temporary certificates if they exist
+    cleanup_temporary_certificates
     
     # Test and reload
     if sudo nginx -t; then

@@ -129,19 +129,48 @@ configure_ufw() {
     local waf_type=$(load_state "WAF_TYPE" "none")
     local domain=$(load_state "DOMAIN")
     
-    # Basic rules
-    sudo ufw --force reset
+    # Basic rules - preserve existing SSH, HTTP, and HTTPS rules
+    info "Configuring UFW with existing rule preservation..."
+    
+    # Save existing SSH rules (port 22) before reset
+    local ssh_rules_file="/tmp/ufw_ssh_rules.txt"
+    sudo ufw status numbered | grep ":22 " > "$ssh_rules_file" 2>/dev/null || true
+    
+    # Only reset if this is a fresh setup (no critical rules exist)
+    local existing_rules=$(sudo ufw status numbered | grep -E "80|443|22" | wc -l)
+    if [ "$existing_rules" -eq 0 ]; then
+        debug "No existing rules found - performing fresh UFW setup"
+        sudo ufw --force reset
+    else
+        debug "Existing rules found - preserving SSH whitelist and SSL rules"
+        # Don't reset - preserve existing rules and add/update as needed
+    fi
+    
     sudo ufw default deny incoming
     sudo ufw default allow outgoing
     
-    # SSH (already configured by vps-setup.sh)
-    # Keep existing SSH rules
+    # Restore SSH rules if they were saved and we did a reset
+    if [ -f "$ssh_rules_file" ] && [ -s "$ssh_rules_file" ]; then
+        info "Restoring SSH whitelist rules..."
+        while IFS= read -r rule; do
+            # Extract IP and restore rule
+            local ip=$(echo "$rule" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?')
+            if [ -n "$ip" ]; then
+                sudo ufw allow from "$ip" to any port 22 comment "SSH whitelist"
+            fi
+        done < "$ssh_rules_file"
+        rm -f "$ssh_rules_file"
+    fi
     
     # Web traffic based on WAF
     if [ "$waf_type" = "none" ]; then
-        # Direct access
-        sudo ufw allow 80/tcp comment "HTTP"
-        sudo ufw allow 443/tcp comment "HTTPS"
+        # Direct access - check if rules already exist
+        if ! sudo ufw status | grep -q "80/tcp"; then
+            sudo ufw allow 80/tcp comment "HTTP"
+        fi
+        if ! sudo ufw status | grep -q "443/tcp"; then
+            sudo ufw allow 443/tcp comment "HTTPS"
+        fi
     else
         # WAF restricted access
         local waf_ips=$(load_state "WAF_IPS")
