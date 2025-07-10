@@ -1,0 +1,50 @@
+  Desired Secure Standardized Permissions Model - Work in Progress
+
+  Desired User/Group Structure
+
+  Primary Users:
+  - wpuser (999) - WordPress file owner
+  - php-fpm (995) - PHP-FPM process user
+  - www-data (33) - Nginx web server
+  - wp-backup (992) - Backup operations (read-only)
+  - redis (994) - Redis cache service
+
+  Primary Groups:
+  - wordpress (1001) - Main WordPress access group
+  - php-fpm (994) - PHP-FPM specific access
+  - wp-backup (992) - Backup operations
+  - web (1002) - Web server access
+
+  Standardized Permission Matrix
+
+  | User      | Primary Group | Secondary Groups | Purpose                               |
+  |-----------|---------------|------------------|---------------------------------------|
+  | wpuser    | wpuser        | wordpress        | WordPress file ownership              |
+  | php-fpm   | php-fpm       | wordpress, web   | PHP execution with WordPress access   |
+  | www-data  | www-data      | wordpress, web   | Web server with WordPress read access |
+  | wp-backup | wp-backup     | wordpress        | Read-only backup access               |
+
+  Directory Structure & Permissions
+
+  /var/www/wordpress/                     (755, wpuser:wordpress)
+  ├── wp-config.php                       (640, wpuser:wordpress)
+  ├── index.php                           (644, wpuser:wordpress)
+  ├── wp-content/                         (755, wpuser:wordpress)
+  │   ├── uploads/                        (2775, php-fpm:wordpress) *writable*
+  │   ├── cache/                          (2775, php-fpm:wordpress) *writable*
+  │   ├── upgrade/                        (2775, php-fpm:wordpress) *writable*
+  │   ├── themes/                         (755, wpuser:wordpress)
+  │   ├── plugins/                        (755, wpuser:wordpress)
+  │   └── mu-plugins/                     (755, wpuser:wordpress)
+  ├── wp-admin/                           (755, wpuser:wordpress)
+  ├── wp-includes/                        (755, wpuser:wordpress)
+  ├── backups/                            (2750, wpuser:wordpress) *backup access*
+  ├── logs/                               (2750, wpuser:wordpress)
+  └── tmp/                                (2770, wpuser:wordpress) *temp files*
+
+  Key Permission Principles:
+  - 644 for readable files (PHP, CSS, JS, images)
+  - 755 for directories and executable files
+  - 640 for sensitive config files (wp-config.php)
+  - 2775 for writable directories (setgid + group write)
+  - 2750 for backup/log directories (setgid + group read)

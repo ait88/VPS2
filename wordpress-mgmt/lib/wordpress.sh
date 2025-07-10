@@ -36,6 +36,9 @@ install_wordpress() {
     show_progress 6 6 "Finalizing installation"
     finalize_wordpress_install
     
+    # Ensure consistent permissions after WordPress setup
+    ensure_wordpress_permissions
+    
     save_state "WORDPRESS_INSTALLED" "true"
     success "✓ WordPress installed successfully"
 }
@@ -761,6 +764,36 @@ complete_wordpress_setup() {
     
     success "WordPress infrastructure setup completed successfully!"
     show_completion_summary
+}
+
+# Ensure consistent WordPress permissions after installation
+ensure_wordpress_permissions() {
+    local wp_root=$(load_state "WP_ROOT")
+    local wp_user=$(load_state "WP_USER")
+    
+    info "Enforcing standardized WordPress permissions..."
+    
+    # Set consistent ownership - all files use wordpress group
+    sudo chown -R "$wp_user:wordpress" "$wp_root"
+    
+    # Create necessary directories with correct permissions if they don't exist
+    sudo mkdir -p "$wp_root"/{tmp,logs,backups}
+    sudo chown "$wp_user:wordpress" "$wp_root"/{tmp,logs,backups}
+    
+    # Set proper permissions for backup/log directories
+    sudo chmod 2750 "$wp_root"/{logs,backups}
+    sudo chmod 2770 "$wp_root/tmp"
+    
+    # Ensure writable directories have correct ownership for PHP-FPM
+    local writable_dirs=("wp-content/uploads" "wp-content/cache" "wp-content/upgrade")
+    for dir in "${writable_dirs[@]}"; do
+        if [ -d "$wp_root/$dir" ]; then
+            sudo chown php-fpm:wordpress "$wp_root/$dir"
+            sudo chmod 2775 "$wp_root/$dir"
+        fi
+    done
+    
+    debug "WordPress permissions standardized"
 }
 
 debug "WordPress module loaded successfully"

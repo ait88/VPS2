@@ -199,4 +199,43 @@ show_progress() {
     fi
 }
 
+# ===== STANDARDIZED PERMISSIONS =====
+enforce_standard_permissions() {
+    local wp_root=$(load_state "WP_ROOT")
+    local wp_user=$(load_state "WP_USER")
+    
+    info "Enforcing standardized permission model..."
+    
+    # Base ownership - everything owned by wpuser:wordpress
+    sudo chown -R "$wp_user:wordpress" "$wp_root"
+    
+    # Base permissions
+    sudo find "$wp_root" -type f -exec chmod 644 {} \;
+    sudo find "$wp_root" -type d -exec chmod 755 {} \;
+    
+    # Sensitive configuration
+    if [ -f "$wp_root/wp-config.php" ]; then
+        sudo chmod 640 "$wp_root/wp-config.php"
+    fi
+    
+    # Writable areas owned by php-fpm for write access
+    local writable_dirs=("wp-content/uploads" "wp-content/cache" "wp-content/upgrade" "tmp")
+    for dir in "${writable_dirs[@]}"; do
+        if [ -d "$wp_root/$dir" ]; then
+            sudo chown php-fpm:wordpress "$wp_root/$dir"
+            sudo chmod 2775 "$wp_root/$dir"
+        fi
+    done
+    
+    # Restricted access areas
+    local restricted_dirs=("backups" "logs")
+    for dir in "${restricted_dirs[@]}"; do
+        if [ -d "$wp_root/$dir" ]; then
+            sudo chmod 2750 "$wp_root/$dir"
+        fi
+    done
+    
+    success "✓ Standardized permissions applied"
+}
+
 debug "Utils module loaded successfully"

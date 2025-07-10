@@ -216,18 +216,64 @@ configure_ufw() {
     success "Firewall configured"
 }
 
+ensure_nginx_access() {
+    info "Ensuring nginx has read access to WordPress files..."
+    
+    # Add www-data to wordpress group to allow file access
+    sudo usermod -a -G wordpress www-data
+    
+    # Verify the group membership
+    if groups www-data | grep -q wordpress; then
+        debug "www-data successfully added to wordpress group"
+    else
+        warning "Failed to add www-data to wordpress group"
+    fi
+}
+
 harden_permissions() {
-    info "Hardening file permissions..."
+    info "Hardening file permissions with standardized security model..."
     
     local wp_root=$(load_state "WP_ROOT")
     local wp_user=$(load_state "WP_USER")
     local php_user=$(load_state "PHP_USER")
     
-    # Remove unnecessary permissions
-    sudo find "$wp_root" -type f -name "*.php" -exec chmod 640 {} \;
-    sudo find "$wp_root" -type d -exec chmod 750 {} \;
+    # Ensure nginx user (www-data) can read WordPress files
+    ensure_nginx_access
     
-    # Protect sensitive files
+    # Apply standardized permission model
+    info "Applying standardized WordPress permissions..."
+    
+    # Base ownership - all files use wordpress group consistently
+    sudo chown -R "$wp_user:wordpress" "$wp_root"
+    
+    # Base permissions - 644 for files, 755 for directories
+    sudo find "$wp_root" -type f -exec chmod 644 {} \;
+    sudo find "$wp_root" -type d -exec chmod 755 {} \;
+    
+    # Create necessary directories with correct permissions if they don't exist
+    sudo mkdir -p "$wp_root"/{tmp,logs,backups}
+    
+    # Writable directories with setgid for PHP-FPM write access
+    local writable_dirs=("wp-content/uploads" "wp-content/cache" "wp-content/upgrade" "tmp")
+    for dir in "${writable_dirs[@]}"; do
+        if [ -d "$wp_root/$dir" ]; then
+            sudo chown php-fpm:wordpress "$wp_root/$dir"
+            sudo chmod 2775 "$wp_root/$dir"
+            info "Set writable permissions on $dir (2775, php-fpm:wordpress)"
+        fi
+    done
+    
+    # Restricted access directories with setgid
+    local restricted_dirs=("backups" "logs")
+    for dir in "${restricted_dirs[@]}"; do
+        if [ -d "$wp_root/$dir" ]; then
+            sudo chmod 2750 "$wp_root/$dir"
+            sudo chown "$wp_user:wordpress" "$wp_root/$dir"
+            info "Set restricted permissions on $dir (2750, $wp_user:wordpress)"
+        fi
+    done
+    
+    # Protect sensitive files - use wordpress group consistently
     local sensitive_files=(
         "wp-config.php"
         ".htaccess"
@@ -237,7 +283,17 @@ harden_permissions() {
     )
     
     for file in "${sensitive_files[@]}"; do
-        [ -f "$wp_root/$file" ] && sudo chmod 400 "$wp_root/$file"
+        if [ -f "$wp_root/$file" ]; then
+            # wp-config.php needs to be readable by PHP-FPM via wordpress group
+            if [ "$file" = "wp-config.php" ]; then
+                sudo chmod 640 "$wp_root/$file"
+                sudo chown "$wp_user:wordpress" "$wp_root/$file"
+                info "Set secure permissions on wp-config.php (640, $wp_user:wordpress)"
+            else
+                sudo chmod 600 "$wp_root/$file"
+                sudo chown "$wp_user:wordpress" "$wp_root/$file"
+            fi
+        fi
     done
     
     # Remove unnecessary files
@@ -258,6 +314,8 @@ harden_permissions() {
         sudo chattr +i "$wp_root/wp-config.php"
         info "wp-config.php is now immutable (use 'chattr -i' to modify)"
     fi
+    
+    success "✓ Standardized security permissions applied"
 }
 
 apply_system_hardening() {

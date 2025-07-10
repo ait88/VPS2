@@ -84,6 +84,13 @@ create_system_users() {
         sudo useradd -r -s /bin/bash -d "/home/$backup_user" -m "$backup_user"
         sudo passwd -l "$backup_user"
     fi
+    
+    # Fix backup user home directory ownership (security fix)
+    if [ -d "/home/$backup_user" ]; then
+        sudo chown -R "$backup_user:$backup_user" "/home/$backup_user"
+        sudo chmod 750 "/home/$backup_user"
+        debug "Fixed backup user home directory ownership"
+    fi
 }
 
 setup_security_groups() {
