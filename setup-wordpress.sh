@@ -388,6 +388,7 @@ show_menu() {
     echo "2) Import existing WordPress site"  
     echo "3) Restore from backup"
     echo "4) Update modules"
+    echo "5) Test SSH import connectivity"    # NEW OPTION
     echo
     echo "Management Menus:"
     echo "6) Utils Menu (Permissions, Domain Change, Nuke)"
@@ -412,6 +413,7 @@ show_menu() {
             success "All modules updated"
             show_menu
             ;;
+        5) test_ssh_import && show_menu ;;    # NEW
         6) show_utils_menu ;;
         7) show_monitoring_menu ;;
         8) show_maintenance_menu ;;
@@ -669,6 +671,46 @@ update_primary_domain() {
     info "Run: sudo certbot --nginx -d $new_domain -d www.$new_domain"
     
     return 0
+}
+
+test_ssh_import() {
+    info "=== SSH Import Test Mode ==="
+    echo
+    echo "This will test SSH connectivity and WordPress discovery."
+    echo "No files will be transferred or imported."
+    echo
+    
+    # Load required modules
+    for module in utils.sh wordpress.sh; do
+        load_module "$module"
+    done
+    
+    # Ensure sshpass is available
+    ensure_sshpass || return 1
+    
+    # Get SSH credentials
+    get_ssh_credentials || return 1
+    
+    # Test connection
+    test_ssh_connection || return 1
+    
+    # Discover WordPress sites
+    local selected_wp_dir
+    selected_wp_dir=$(discover_and_select_wordpress) || return 1
+    
+    # Extract database credentials
+    local db_creds
+    db_creds=$(extract_remote_db_creds "$selected_wp_dir") || return 1
+    
+    echo
+    success "SSH import test completed successfully!"
+    echo "Found WordPress at: $selected_wp_dir"
+    echo "Database credentials extracted successfully"
+    echo
+    
+    if confirm "Show extracted credentials?" N; then
+        echo "$db_creds"
+    fi
 }
 
 # ===== MAIN EXECUTION =====
