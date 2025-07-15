@@ -66,17 +66,17 @@ confirm() {
 
 get_input() {
     local prompt=$1
-    local default=$2
+    local default=${2:-""}
     local secret=${3:-false}
     
     if [ "$secret" = true ]; then
-        echo -ne "\033[1;36m${prompt}\033[0m"
+        echo -ne "\033[1;36m${prompt}\033[0m" >&2
         read -s input
-        echo
+        echo >&2
     else
-        echo -ne "\033[1;36m${prompt}"
-        [ -n "$default" ] && echo -ne " [$default]"
-        echo -ne ":\033[0m "
+        echo -ne "\033[1;36m${prompt}" >&2
+        [ -n "$default" ] && echo -ne " [$default]" >&2
+        echo -ne ":\033[0m " >&2
         read -r input
     fi
     
