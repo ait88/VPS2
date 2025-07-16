@@ -516,16 +516,35 @@ get_ssh_credentials() {
     info "SSH Connection Settings"
     echo "────────────────────────"
     
-    # Get SSH details with proper prompting
-    SSH_HOST=$(get_input "SSH hostname/IP" "")
-    [ -z "$SSH_HOST" ] && { error "Hostname required"; return 1; }
+    # Initialize variables
+    SSH_HOST=""
+    SSH_PORT=""
+    SSH_USER=""
+    SSH_PASS=""
     
-    SSH_PORT=$(get_input "SSH port" "22")
-    SSH_USER=$(get_input "SSH username" "")
-    [ -z "$SSH_USER" ] && { error "Username required"; return 1; }
+    # Get SSH details with direct input to avoid subshell issues
+    while [ -z "$SSH_HOST" ]; do
+        echo -n "SSH hostname/IP: "
+        read -r SSH_HOST
+        [ -z "$SSH_HOST" ] && error "Hostname required"
+    done
     
-    SSH_PASS=$(get_input "SSH password" "" true)
-    [ -z "$SSH_PASS" ] && { error "Password required"; return 1; }
+    echo -n "SSH port [22]: "
+    read -r SSH_PORT
+    SSH_PORT=${SSH_PORT:-22}
+    
+    while [ -z "$SSH_USER" ]; do
+        echo -n "SSH username: "
+        read -r SSH_USER
+        [ -z "$SSH_USER" ] && error "Username required"
+    done
+    
+    while [ -z "$SSH_PASS" ]; do
+        echo -n "SSH password: "
+        read -s SSH_PASS
+        echo
+        [ -z "$SSH_PASS" ] && error "Password required"
+    done
     
     info "Testing SSH connection to $SSH_USER@$SSH_HOST:$SSH_PORT..."
     return 0
@@ -541,7 +560,7 @@ test_ssh_connection() {
     
     # Test required commands
     local test_result
-    test_result=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 'command -v mysql && command -v tar && command -v php' 2>/dev/null)
+    test_result=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 'LC_ALL=C command -v mysql && command -v tar && command -v php' 2>/dev/null)
     
     local missing_commands=()
     if ! echo "$test_result" | grep -q mysql; then
@@ -567,11 +586,11 @@ test_ssh_connection() {
 
 # Discover WordPress installations and let user select
 discover_and_select_wordpress() {
-    info "Discovering WordPress installations..."
+    info "Discovering WordPress installations..." >&2
     
     # Find all wp-config.php files
     local wp_sites
-    wp_sites=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 'find ~ -name "wp-config.php" -type f 2>/dev/null | head -10' 2>/dev/null)
+    wp_sites=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 'LC_ALL=C find ~ -name "wp-config.php" -type f 2>/dev/null | head -10' 2>/dev/null)
     
     if [ -z "$wp_sites" ]; then
         error "No WordPress installations found"
@@ -588,15 +607,15 @@ discover_and_select_wordpress() {
     if [ ${#sites_array[@]} -eq 1 ]; then
         local selected_site="${sites_array[0]}"
         local wp_dir=$(dirname "$selected_site")
-        info "Found single WordPress site: $wp_dir"
+        info "Found single WordPress site: $wp_dir" >&2
         echo "$wp_dir"
         return 0
     fi
     
     # Multiple sites - show selection menu
-    echo
-    echo "Multiple WordPress sites found:"
-    echo "─────────────────────────────────"
+    echo >&2
+    echo "Multiple WordPress sites found:" >&2
+    echo "─────────────────────────────────" >&2
     
     local i=1
     for site in "${sites_array[@]}"; do
@@ -605,15 +624,15 @@ discover_and_select_wordpress() {
         
         # Try to get site title via WP-CLI
         local site_title=""
-        site_title=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && wp option get blogname 2>/dev/null" 2>/dev/null || echo "")
+        site_title=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && LC_ALL=C wp option get blogname 2>/dev/null" 2>/dev/null || echo "")
         
         if [ -n "$site_title" ]; then
-            echo "$i) $wp_dir"
-            echo "   Site: $site_title"
+            echo "$i) $wp_dir" >&2
+            echo "   Site: $site_title" >&2
         else
-            echo "$i) $wp_dir"
+            echo "$i) $wp_dir" >&2
         fi
-        echo
+        echo >&2
         ((i++))
     done
     
@@ -631,9 +650,12 @@ discover_and_select_wordpress() {
     # Get user selection
     local prompt="Select WordPress site"
     [ -n "$default_choice" ] && prompt="$prompt [$default_choice]"
+    prompt="$prompt: "
     
     local choice
-    choice=$(get_input "$prompt" "$default_choice")
+    echo -ne "\033[1;36m${prompt}\033[0m" >&2
+    read -r choice
+    choice=${choice:-$default_choice}
     
     # Validate selection
     if [[ ! "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#sites_array[@]} ]; then
@@ -645,7 +667,7 @@ discover_and_select_wordpress() {
     local selected_site="${sites_array[$((choice-1))]}"
     local wp_dir=$(dirname "$selected_site")
     
-    info "Selected: $wp_dir"
+    info "Selected: $wp_dir" >&2
     echo "$wp_dir"
 }
 
@@ -657,7 +679,7 @@ extract_remote_db_creds() {
     
     # Method 1: Use PHP to parse wp-config.php (most reliable)
     local php_result
-    php_result=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && php -r \"
+    php_result=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && LC_ALL=C php -r \"
 include 'wp-config.php';
 echo 'DB_NAME=' . DB_NAME . '\n';
 echo 'DB_USER=' . DB_USER . '\n';
@@ -683,7 +705,7 @@ echo 'DB_HOST=' . DB_HOST . '\n';
     # Method 3: Manual parsing as last resort
     warning "WP-CLI failed, using manual parsing..."
     local manual_result
-    manual_result=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && grep -E \"define.*'DB_\" wp-config.php | sed -n \"s/.*define.*'\\([^']*\\)'.*'\\([^']*\\)'.*/\\1=\\2/p\"" 2>/dev/null)
+    manual_result=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && LC_ALL=C grep -E \"define.*'DB_\" wp-config.php | sed -n \"s/.*define.*'\\([^']*\\)'.*'\\([^']*\\)'.*/\\1=\\2/p\"" 2>/dev/null)
     
     if [ -n "$manual_result" ]; then
         echo "$manual_result"
@@ -702,8 +724,13 @@ confirm_database_settings() {
     info "Database Credentials Found:"
     echo "─────────────────────────────"
     
-    # Parse credentials
-    local db_name db_user db_password db_host
+    # Parse credentials (handle both newlines and \n literals)
+    local db_name="" db_user="" db_password="" db_host=""
+    
+    # Convert literal \n to actual newlines if needed
+    local cleaned_creds
+    cleaned_creds=$(echo "$db_creds" | sed 's/\\n/\n/g')
+    
     while IFS='=' read -r key value; do
         case $key in
             DB_NAME) db_name="$value" ;;
@@ -711,7 +738,7 @@ confirm_database_settings() {
             DB_PASSWORD) db_password="$value" ;;
             DB_HOST) db_host="$value" ;;
         esac
-    done <<< "$db_creds"
+    done <<< "$cleaned_creds"
     
     # Display (with masked password)
     echo "Database Name: $db_name"
@@ -767,25 +794,44 @@ create_and_transfer_backup() {
     # Step 2: Create database dump
     info "Creating database dump..."
     
-    # Try WP-CLI first
-    if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && wp db export '$remote_backup_dir/db.sql' 2>/dev/null"; then
-        success "Database exported via WP-CLI"
-    elif sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mysqldump -h'$REMOTE_DB_HOST' -u'$REMOTE_DB_USER' -p'$REMOTE_DB_PASS' '$REMOTE_DB_NAME' > '$remote_backup_dir/db.sql' 2>/dev/null"; then
-        success "Database exported via mysqldump"
-    else
-        error "Database export failed"
-        return 1
-    fi
+    # Try WP-CLI first with progress indicator
+    {
+        sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && LC_ALL=C wp db export '$remote_backup_dir/db.sql'" >/dev/null 2>&1 &
+        local db_pid=$!
+        
+        # Show activity indicator
+        while kill -0 $db_pid 2>/dev/null; do
+            echo -n "." >&2
+            sleep 2
+        done
+        echo >&2
+        
+        wait $db_pid
+        local db_status=$?
+        
+        if [ $db_status -eq 0 ]; then
+            success "Database exported via WP-CLI"
+        else
+            # Try mysqldump as fallback
+            info "WP-CLI failed, trying mysqldump..."
+            if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C mysqldump -h'$REMOTE_DB_HOST' -u'$REMOTE_DB_USER' -p'$REMOTE_DB_PASS' '$REMOTE_DB_NAME' > '$remote_backup_dir/db.sql'" >/dev/null 2>&1; then
+                success "Database exported via mysqldump"
+            else
+                error "Database export failed"
+                return 1
+            fi
+        fi
+    }
     
     # Compress database dump
-    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "gzip '$remote_backup_dir/db.sql'" || {
+    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C gzip '$remote_backup_dir/db.sql'" >/dev/null 2>&1 || {
         warning "Failed to compress database dump"
     }
     
     # Step 3: Copy wp-content
     info "Copying wp-content directory..."
-    if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "[ -d '$wp_dir/wp-content' ]"; then
-        sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cp -r '$wp_dir/wp-content' '$remote_backup_dir/'" || {
+    if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C [ -d '$wp_dir/wp-content' ]" >/dev/null 2>&1; then
+        sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C cp -r '$wp_dir/wp-content' '$remote_backup_dir/'" >/dev/null 2>&1 || {
             error "Failed to copy wp-content"
             return 1
         }
@@ -802,12 +848,29 @@ create_and_transfer_backup() {
     
     # Step 5: Transfer archive
     info "Transferring backup archive..."
-    if sshpass -p "$SSH_PASS" scp -P "$SSH_PORT" "$SSH_USER@$SSH_HOST:/tmp/${backup_name}.tar.gz" "$local_backup_file"; then
-        success "Backup transferred successfully"
-    else
-        error "Failed to transfer backup"
-        return 1
-    fi
+    
+    # Show progress for large transfers
+    {
+        sshpass -p "$SSH_PASS" scp -P "$SSH_PORT" "$SSH_USER@$SSH_HOST:/tmp/${backup_name}.tar.gz" "$local_backup_file" &
+        local scp_pid=$!
+        
+        # Show activity indicator while transfer is running
+        while kill -0 $scp_pid 2>/dev/null; do
+            echo -n "." >&2
+            sleep 5
+        done
+        echo >&2
+        
+        wait $scp_pid
+        local scp_status=$?
+        
+        if [ $scp_status -eq 0 ]; then
+            success "Backup transferred successfully"
+        else
+            error "Failed to transfer backup"
+            return 1
+        fi
+    }
     
     # Step 6: Cleanup remote files
     info "Cleaning up remote files..."
@@ -845,26 +908,6 @@ ensure_sshpass() {
 }
 
 # Collect SSH connection credentials
-get_ssh_credentials() {
-    info "SSH Connection Settings"
-    echo "────────────────────────"
-    
-    # Get SSH details with defaults
-    SSH_HOST=$(get_input "SSH hostname/IP" "")
-    [ -z "$SSH_HOST" ] && { error "Hostname required"; return 1; }
-    
-    SSH_PORT=$(get_input "SSH port" "22")
-    SSH_USER=$(get_input "SSH username" "")
-    [ -z "$SSH_USER" ] && { error "Username required"; return 1; }
-    
-    SSH_PASS=$(get_input "SSH password" "" true)
-    [ -z "$SSH_PASS" ] && { error "Password required"; return 1; }
-    
-    # Test basic connectivity
-    info "Testing SSH connection to $SSH_USER@$SSH_HOST:$SSH_PORT..."
-    
-    return 0
-}
 
 # Test SSH connection and basic commands
 test_ssh_connection() {
@@ -878,7 +921,7 @@ test_ssh_connection() {
     local missing_commands=()
     local test_result
     
-    test_result=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 'command -v mysql && command -v tar && command -v php' 2>/dev/null)
+    test_result=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 'LC_ALL=C command -v mysql && command -v tar && command -v php' 2>/dev/null)
     
     if ! echo "$test_result" | grep -q mysql; then
         missing_commands+=("mysql")
@@ -900,89 +943,6 @@ test_ssh_connection() {
 }
 
 # Discover WordPress installations and let user select
-discover_and_select_wordpress() {
-    info "Discovering WordPress installations..."
-    
-    # Find all wp-config.php files
-    local wp_sites
-    wp_sites=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 'find ~ -name "wp-config.php" -type f 2>/dev/null | head -10')
-    
-    if [ -z "$wp_sites" ]; then
-        error "No WordPress installations found"
-        return 1
-    fi
-    
-    # Convert to array
-    local sites_array=()
-    while IFS= read -r site; do
-        [ -n "$site" ] && sites_array+=("$site")
-    done <<< "$wp_sites"
-    
-    # If only one site, use it
-    if [ ${#sites_array[@]} -eq 1 ]; then
-        local selected_site="${sites_array[0]}"
-        local wp_dir=$(dirname "$selected_site")
-        info "Found single WordPress site: $wp_dir"
-        echo "$wp_dir"
-        return 0
-    fi
-    
-    # Multiple sites - show selection menu
-    echo
-    echo "Multiple WordPress sites found:"
-    echo "─────────────────────────────────"
-    
-    local i=1
-    for site in "${sites_array[@]}"; do
-        local wp_dir=$(dirname "$site")
-        local site_name=$(basename "$wp_dir")
-        
-        # Try to get site title via WP-CLI
-        local site_title=""
-        site_title=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && wp option get blogname 2>/dev/null" || echo "")
-        
-        if [ -n "$site_title" ]; then
-            echo "$i) $wp_dir"
-            echo "   Site: $site_title"
-        else
-            echo "$i) $wp_dir"
-        fi
-        echo
-        ((i++))
-    done
-    
-    # Default to public_html if it exists
-    local default_choice=""
-    local j=1
-    for site in "${sites_array[@]}"; do
-        if [[ "$(dirname "$site")" =~ public_html$ ]]; then
-            default_choice="$j"
-            break
-        fi
-        ((j++))
-    done
-    
-    # Get user selection
-    local prompt="Select WordPress site"
-    [ -n "$default_choice" ] && prompt="$prompt [$default_choice]"
-    prompt="$prompt: "
-    
-    read -p "$prompt" choice
-    choice=${choice:-$default_choice}
-    
-    # Validate selection
-    if [[ ! "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#sites_array[@]} ]; then
-        error "Invalid selection"
-        return 1
-    fi
-    
-    # Return selected directory
-    local selected_site="${sites_array[$((choice-1))]}"
-    local wp_dir=$(dirname "$selected_site")
-    
-    info "Selected: $wp_dir"
-    echo "$wp_dir"
-}
 
 # Extract database credentials from remote wp-config.php
 extract_remote_db_creds() {
@@ -992,7 +952,7 @@ extract_remote_db_creds() {
     
     # Method 1: Use PHP to parse wp-config.php (most reliable)
     local php_result
-    php_result=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && php -r \"
+    php_result=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && LC_ALL=C php -r \"
 include 'wp-config.php';
 echo 'DB_NAME=' . DB_NAME . '\n';
 echo 'DB_USER=' . DB_USER . '\n';
@@ -1018,7 +978,7 @@ echo 'DB_HOST=' . DB_HOST . '\n';
     # Method 3: Manual parsing as last resort
     warning "WP-CLI failed, using manual parsing..."
     local manual_result
-    manual_result=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && grep -E \"define.*'DB_\" wp-config.php | sed -n \"s/.*define.*'\\([^']*\\)'.*'\\([^']*\\)'.*/\\1=\\2/p\"")
+    manual_result=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && LC_ALL=C grep -E \"define.*'DB_\" wp-config.php | sed -n \"s/.*define.*'\\([^']*\\)'.*'\\([^']*\\)'.*/\\1=\\2/p\"" 2>/dev/null)
     
     if [ -n "$manual_result" ]; then
         echo "$manual_result"
@@ -1037,8 +997,13 @@ confirm_database_settings() {
     info "Database Credentials Found:"
     echo "─────────────────────────────"
     
-    # Parse credentials
-    local db_name db_user db_password db_host
+    # Parse credentials (handle both newlines and \n literals)
+    local db_name="" db_user="" db_password="" db_host=""
+    
+    # Convert literal \n to actual newlines if needed
+    local cleaned_creds
+    cleaned_creds=$(echo "$db_creds" | sed 's/\\n/\n/g')
+    
     while IFS='=' read -r key value; do
         case $key in
             DB_NAME) db_name="$value" ;;
@@ -1046,7 +1011,7 @@ confirm_database_settings() {
             DB_PASSWORD) db_password="$value" ;;
             DB_HOST) db_host="$value" ;;
         esac
-    done <<< "$db_creds"
+    done <<< "$cleaned_creds"
     
     # Display (with masked password)
     echo "Database Name: $db_name"
@@ -1074,94 +1039,6 @@ confirm_database_settings() {
 }
 
 # Create backup on remote server and transfer
-create_and_transfer_backup() {
-    local wp_dir=$1
-    local timestamp=$(date +%Y%m%d_%H%M%S)
-    local backup_name="wordpress_ssh_backup_$timestamp"
-    local remote_backup_dir="/tmp/$backup_name"
-    local local_backup_file="$WP_MGMT_DIR/tmp/${backup_name}.tar.gz"
-    
-    # Create local tmp directory
-    mkdir -p "$WP_MGMT_DIR/tmp"
-    
-    info "Creating remote backup..."
-    
-    # Create backup directory on remote server
-    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mkdir -p '$remote_backup_dir'" || {
-        error "Failed to create remote backup directory"
-        return 1
-    }
-    
-    # Step 1: Copy wp-config.php
-    info "Copying wp-config.php..."
-    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cp '$wp_dir/wp-config.php' '$remote_backup_dir/'" || {
-        error "Failed to copy wp-config.php"
-        return 1
-    }
-    
-    # Step 2: Create database dump
-    info "Creating database dump..."
-    local db_dump_cmd=""
-    
-    # Try WP-CLI first
-    if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && wp db export '$remote_backup_dir/db.sql' 2>/dev/null"; then
-        success "Database exported via WP-CLI"
-    elif sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mysqldump -h'$REMOTE_DB_HOST' -u'$REMOTE_DB_USER' -p'$REMOTE_DB_PASS' '$REMOTE_DB_NAME' > '$remote_backup_dir/db.sql' 2>/dev/null"; then
-        success "Database exported via mysqldump"
-    else
-        error "Database export failed"
-        return 1
-    fi
-    
-    # Compress database dump
-    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "gzip '$remote_backup_dir/db.sql'" || {
-        warning "Failed to compress database dump"
-    }
-    
-    # Step 3: Copy wp-content
-    info "Copying wp-content directory..."
-    if [ -d "$wp_dir/wp-content" ]; then
-        sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cp -r '$wp_dir/wp-content' '$remote_backup_dir/'" || {
-            error "Failed to copy wp-content"
-            return 1
-        }
-    else
-        warning "wp-content directory not found"
-    fi
-    
-    # Step 4: Create archive
-    info "Creating backup archive..."
-    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '/tmp' && tar -czf '${backup_name}.tar.gz' '$backup_name'" || {
-        error "Failed to create backup archive"
-        return 1
-    }
-    
-    # Step 5: Transfer archive
-    info "Transferring backup archive..."
-    if sshpass -p "$SSH_PASS" scp -P "$SSH_PORT" "$SSH_USER@$SSH_HOST:/tmp/${backup_name}.tar.gz" "$local_backup_file"; then
-        success "Backup transferred successfully"
-    else
-        error "Failed to transfer backup"
-        return 1
-    fi
-    
-    # Step 6: Cleanup remote files
-    info "Cleaning up remote files..."
-    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "rm -rf '$remote_backup_dir' '/tmp/${backup_name}.tar.gz'" || {
-        warning "Failed to cleanup remote files"
-    }
-    
-    # Verify local file
-    if [ ! -f "$local_backup_file" ]; then
-        error "Backup file not found locally: $local_backup_file"
-        return 1
-    fi
-    
-    local file_size=$(du -h "$local_backup_file" | cut -f1)
-    success "Backup ready: $local_backup_file ($file_size)"
-    
-    echo "$local_backup_file"
-}
 
 # Install sshpass if not available
 ensure_sshpass() {

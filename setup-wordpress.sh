@@ -32,29 +32,29 @@ log_to_file() {
 
 # Console output functions (clean, no timestamps)
 info() {
-    echo -e "\033[0;34m[INFO]\033[0m $@"
+    echo -e "\033[0;34m[INFO]\033[0m $@" >&2
     log_to_file "INFO" "$@"
 }
 
 success() {
-    echo -e "\033[0;32m[SUCCESS]\033[0m $@"
+    echo -e "\033[0;32m[SUCCESS]\033[0m $@" >&2
     log_to_file "SUCCESS" "$@"
 }
 
 warning() {
-    echo -e "\033[1;33m[WARNING]\033[0m $@"
+    echo -e "\033[1;33m[WARNING]\033[0m $@" >&2
     log_to_file "WARNING" "$@"
 }
 
 error() {
-    echo -e "\033[0;31m[ERROR]\033[0m $@"
+    echo -e "\033[0;31m[ERROR]\033[0m $@" >&2
     log_to_file "ERROR" "$@"
 }
 
 debug() {
     # Only show if DEBUG=1
     if [ "${DEBUG:-0}" = "1" ]; then
-        echo -e "\033[0;90m[DEBUG]\033[0m $@"
+        echo -e "\033[0;90m[DEBUG]\033[0m $@" >&2
     fi
     log_to_file "DEBUG" "$@"
 }
@@ -388,16 +388,15 @@ show_menu() {
     echo "2) Import existing WordPress site"  
     echo "3) Restore from backup"
     echo "4) Update modules"
-    echo "5) Test SSH import connectivity"    # NEW OPTION
     echo
     echo "Management Menus:"
-    echo "6) Utils Menu (Permissions, Domain Change, Nuke)"
-    echo "7) Monitoring Menu"
-    echo "8) Maintenance Menu"
+    echo "5) Utils Menu (Permissions, Domain Change, Nuke)"
+    echo "6) Monitoring Menu"
+    echo "7) Maintenance Menu"
     echo
-    echo "9) Exit"
+    echo "8) Exit"
     echo
-    read -p "Enter your choice [1-9]: " choice
+    read -p "Enter your choice [1-8]: " choice
     echo
     
     case $choice in
@@ -413,11 +412,10 @@ show_menu() {
             success "All modules updated"
             show_menu
             ;;
-        5) test_ssh_import && show_menu ;;    # NEW
-        6) show_utils_menu ;;
-        7) show_monitoring_menu ;;
-        8) show_maintenance_menu ;;
-        9) 
+        5) show_utils_menu ;;
+        6) show_monitoring_menu ;;
+        7) show_maintenance_menu ;;
+        8) 
             info "Exiting..."
             exit 0
             ;;
@@ -436,16 +434,18 @@ show_utils_menu() {
     echo "1) Fix/Enforce Standard Permissions"
     echo "2) Change Primary Domain"
     echo "3) Remove WordPress (Nuke System)"
-    echo "4) Back to Main Menu"
+    echo "4) Test SSH Import Connectivity"
+    echo "5) Back to Main Menu"
     echo
-    read -p "Enter your choice [1-4]: " choice
+    read -p "Enter your choice [1-5]: " choice
     echo
     
     case $choice in
         1) fix_permissions ;;
         2) change_primary_domain ;;
         3) nuke_all ;;
-        4) show_menu ;;
+        4) test_ssh_import && show_utils_menu ;;
+        5) show_menu ;;
         *) 
             error "Invalid choice: $choice"
             show_utils_menu

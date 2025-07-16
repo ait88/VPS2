@@ -68,6 +68,7 @@ get_input() {
     local prompt=$1
     local default=${2:-""}
     local secret=${3:-false}
+    local input=""
     
     if [ "$secret" = true ]; then
         echo -ne "\033[1;36m${prompt}\033[0m" >&2
