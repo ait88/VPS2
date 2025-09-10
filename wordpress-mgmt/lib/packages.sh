@@ -1,6 +1,6 @@
 #!/bin/bash
-# wordpress-mgmt/lib/packages.sh - Package installation and management
-# Version: 3.0.0
+# wordpress-mgmt/lib/packages.sh - Fixed version with WP-CLI installation
+# Version: 3.0.1
 
 install_packages() {
     info "Installing required packages..."
@@ -33,19 +33,25 @@ install_packages() {
     
     # Install OPTIONAL packages (can fail without breaking)
     show_progress 4 8 "Installing optional packages"
-    install_optional_packages
+    install_optional_packages "$php_version"
     
-    # Continue with other steps...
+    # Install security packages
     show_progress 5 8 "Installing security packages"
     install_package_group "Security packages" \
         fail2ban certbot python3-certbot-nginx ufw
     
+    # Install WP-CLI (CRITICAL for WordPress management)
     show_progress 6 8 "Installing WP-CLI"
-    install_wp_cli
+    install_wp_cli || {
+        error "WP-CLI installation failed - this is required for WordPress"
+        exit 1
+    }
     
+    # Configure PHP defaults
     show_progress 7 8 "Configuring PHP defaults"
     configure_php_defaults "$php_version"
     
+    # Enable and start services
     show_progress 8 8 "Enabling services"
     enable_services "$php_version"
     
@@ -68,6 +74,8 @@ install_critical_packages() {
         "php${php_version}-xml"
         "php${php_version}-curl"
         "php${php_version}-mbstring"
+        "php${php_version}-gd"
+        "php${php_version}-zip"
         "curl" "wget" "unzip"
     )
     
@@ -82,12 +90,15 @@ install_critical_packages() {
 }
 
 install_optional_packages() {
+    local php_version=$1
+    
     # These packages enhance functionality but aren't required
     local optional_packages=(
         "rsync" "git" "htop" "iotop" "ncdu"
         "build-essential" "software-properties-common"
-        "php${php_version}-zip" "php${php_version}-imagick"
+        "php${php_version}-imagick"
         "php${php_version}-intl" "php${php_version}-bcmath"
+        "redis-server"
     )
     
     local failed_optional=()
@@ -171,26 +182,41 @@ detect_php_version() {
 
 install_wp_cli() {
     if command -v wp &>/dev/null; then
-        debug "WP-CLI already installed"
+        local current_version=$(wp --version --allow-root 2>/dev/null | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+        debug "WP-CLI already installed (version: $current_version)"
         return 0
     fi
     
+    info "Installing WP-CLI..."
+    
     local wp_cli_url="https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar"
     local wp_cli_path="/usr/local/bin/wp"
+    local temp_wp="/tmp/wp-cli.phar"
     
-    # Download WP-CLI
-    if curl -fsSL "$wp_cli_url" -o /tmp/wp-cli.phar; then
-        chmod +x /tmp/wp-cli.phar
-        sudo mv /tmp/wp-cli.phar "$wp_cli_path"
-        
-        # Verify installation
-        if wp --info &>/dev/null; then
-            debug "WP-CLI installed successfully"
+    # Download WP-CLI with verification
+    if curl -fsSL --connect-timeout 10 --max-time 30 "$wp_cli_url" -o "$temp_wp"; then
+        # Verify it's a valid phar file
+        if php "$temp_wp" --info &>/dev/null; then
+            chmod +x "$temp_wp"
+            sudo mv "$temp_wp" "$wp_cli_path"
+            
+            # Final verification
+            if wp --version --allow-root &>/dev/null; then
+                local wp_version=$(wp --version --allow-root | grep -oP '\d+\.\d+\.\d+')
+                success "WP-CLI installed successfully (version: $wp_version)"
+                return 0
+            else
+                error "WP-CLI installed but verification failed"
+                return 1
+            fi
         else
-            warning "WP-CLI installed but verification failed"
+            error "Downloaded WP-CLI file is invalid"
+            rm -f "$temp_wp"
+            return 1
         fi
     else
-        warning "Failed to download WP-CLI"
+        error "Failed to download WP-CLI"
+        return 1
     fi
 }
 
@@ -203,6 +229,8 @@ configure_php_defaults() {
         return 1
     fi
     
+    info "Configuring PHP defaults for WordPress..."
+    
     # Backup original
     backup_file "$php_ini"
     
@@ -214,6 +242,9 @@ configure_php_defaults() {
         "max_execution_time = 300"
         "max_input_time = 300"
         "max_input_vars = 3000"
+        "max_file_uploads = 20"
+        "allow_url_fopen = Off"
+        "expose_php = Off"
     )
     
     for setting in "${settings[@]}"; do
@@ -223,12 +254,14 @@ configure_php_defaults() {
         # Update or add setting
         if grep -q "^${key} = " "$php_ini"; then
             sudo sed -i "s/^${key} = .*/${setting}/" "$php_ini"
+        elif grep -q "^;${key} = " "$php_ini"; then
+            sudo sed -i "s/^;${key} = .*/${setting}/" "$php_ini"
         else
             echo "$setting" | sudo tee -a "$php_ini" >/dev/null
         fi
     done
     
-    debug "PHP defaults configured"
+    debug "PHP defaults configured for WordPress"
 }
 
 enable_services() {
@@ -274,24 +307,11 @@ enable_services() {
     done
 }
 
-install_additional_tools() {
-    # Install Composer (useful for some plugins)
-    if ! command -v composer &>/dev/null; then
-        debug "Installing Composer..."
-        curl -sS https://getcomposer.org/installer | php -- --quiet
-        sudo mv composer.phar /usr/local/bin/composer 2>/dev/null || true
-    fi
-    
-    # Install nodejs/npm (for modern WordPress development)
-    if ! command -v node &>/dev/null && confirm "Install Node.js for modern WordPress development?" N; then
-        curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-        sudo apt-get install -y nodejs
-    fi
-}
-
 verify_installation() {
     local php_version=$1
     local all_good=true
+    
+    info "Verifying package installation..."
     
     # Check critical services
     local services=(
@@ -327,16 +347,19 @@ verify_installation() {
         if ! command -v "$cmd" &>/dev/null; then
             error "Command not found: $cmd"
             all_good=false
+        else
+            debug "Command verified: $cmd"
         fi
     done
     
-    # Check PHP modules with correct detection
+    # Check PHP modules
     local required_modules=(
-        "mysqli"  # More specific than just "mysql"
+        "mysqli"
         "gd"
         "mbstring"
         "xml"
         "curl"
+        "zip"
     )
     
     for module in "${required_modules[@]}"; do
@@ -354,6 +377,8 @@ verify_installation() {
                     warning "PHP module not loaded: $module"
                     ;;
             esac
+        else
+            debug "PHP module verified: $module"
         fi
     done
     
@@ -362,39 +387,7 @@ verify_installation() {
         return 1
     fi
     
-    debug "All packages verified successfully"
-}
-
-# Function to uninstall packages (for cleanup/reset)
-uninstall_packages() {
-    if ! confirm "Remove all WordPress-related packages? This cannot be undone!" N; then
-        return 1
-    fi
-    
-    info "Removing packages..."
-    
-    # Stop services first
-    local services=(
-        "nginx"
-        "php*-fpm"
-        "mariadb"
-    )
-    
-    for service in "${services[@]}"; do
-        sudo systemctl stop $service 2>/dev/null || true
-    done
-    
-    # Remove packages
-    sudo apt-get remove --purge -y nginx* php* mariadb* mysql*
-    sudo apt-get autoremove -y
-    
-    # Remove WP-CLI
-    sudo rm -f /usr/local/bin/wp
-    
-    # Clear state
-    state_exists "PACKAGES_INSTALLED" && save_state "PACKAGES_INSTALLED" "false"
-    
-    warning "Packages removed. You may need to manually clean up configuration files in /etc/"
+    success "All packages verified successfully"
 }
 
 debug "Packages module loaded successfully"
