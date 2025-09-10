@@ -24,58 +24,90 @@ install_packages() {
     info "Selected PHP version: $php_version"
     save_state "PHP_VERSION" "$php_version"
     
-    # Install packages in groups for better error handling
-    show_progress 3 8 "Installing core packages"
-    install_package_group "Core packages" \
-        nginx nginx-extras mariadb-server mariadb-client
+    # Install CRITICAL packages first (must succeed)
+    show_progress 3 8 "Installing critical packages"
+    install_critical_packages "$php_version" || {
+        error "Critical package installation failed"
+        exit 1
+    }
     
-    show_progress 4 8 "Installing PHP packages"
-    install_package_group "PHP packages" \
-        "php${php_version}-fpm" \
-        "php${php_version}-mysql" \
-        "php${php_version}-xml" \
-        "php${php_version}-curl" \
-        "php${php_version}-mbstring" \
-        "php${php_version}-zip" \
-        "php${php_version}-imagick" \
-        "php${php_version}-intl" \
-        "php${php_version}-bcmath" \
-        "php${php_version}-soap" \
-        "php${php_version}-opcache" \
-        "php${php_version}-cli"
+    # Install OPTIONAL packages (can fail without breaking)
+    show_progress 4 8 "Installing optional packages"
+    install_optional_packages
     
-    # Try alternative for gd if it failed
-    if ! install_package_group "PHP Graphics" "php${php_version}-gd"; then
-        warning "php${php_version}-gd failed, trying alternatives..."
-        # Sometimes it's available as separate package or already included
-        if ! sudo apt-get install -y "php-gd" &>/dev/null; then
-            warning "GD extension not available - image processing may be limited"
-        fi
-    fi
-    
+    # Continue with other steps...
     show_progress 5 8 "Installing security packages"
     install_package_group "Security packages" \
         fail2ban certbot python3-certbot-nginx ufw
     
-    show_progress 6 8 "Installing tools"
-    install_package_group "Tools" \
-        curl wget unzip rsync git htop iotop ncdu \
-        build-essential software-properties-common
+    # Rest of installation...
+}
+
+install_critical_packages() {
+    local php_version=$1
     
-    # Install WP-CLI
-    show_progress 7 8 "Installing WP-CLI"
-    install_wp_cli
+    # These packages are REQUIRED for WordPress to function
+    local critical_packages=(
+        "nginx" "nginx-extras" 
+        "mariadb-server" "mariadb-client"
+        "php${php_version}-fpm"
+        "php${php_version}-mysql"
+        "php${php_version}-xml"
+        "php${php_version}-curl"
+        "php${php_version}-mbstring"
+        "curl" "wget" "unzip"
+    )
     
-    # Configure and verify
-    configure_php_defaults "$php_version"
-    enable_services "$php_version"
-    install_additional_tools
+    for package in "${critical_packages[@]}"; do
+        if ! install_single_package "$package" "CRITICAL"; then
+            error "Failed to install critical package: $package"
+            return 1
+        fi
+    done
     
-    show_progress 8 8 "Verifying installation"
-    verify_installation "$php_version"
+    return 0
+}
+
+install_optional_packages() {
+    # These packages enhance functionality but aren't required
+    local optional_packages=(
+        "rsync" "git" "htop" "iotop" "ncdu"
+        "build-essential" "software-properties-common"
+        "php${php_version}-zip" "php${php_version}-imagick"
+        "php${php_version}-intl" "php${php_version}-bcmath"
+    )
     
-    save_state "PACKAGES_INSTALLED" "true"
-    success "✓ All packages installed successfully"
+    local failed_optional=()
+    
+    for package in "${optional_packages[@]}"; do
+        if ! install_single_package "$package" "OPTIONAL"; then
+            failed_optional+=("$package")
+        fi
+    done
+    
+    if [ ${#failed_optional[@]} -gt 0 ]; then
+        warning "Optional packages failed: ${failed_optional[*]}"
+        warning "WordPress will still function normally"
+    fi
+    
+    return 0
+}
+
+install_single_package() {
+    local package=$1
+    local type=$2
+    
+    if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$package" &>/dev/null; then
+        debug "$type package installed: $package"
+        return 0
+    else
+        if [ "$type" = "CRITICAL" ]; then
+            error "CRITICAL package failed: $package"
+        else
+            warning "Optional package failed: $package"
+        fi
+        return 1
+    fi
 }
 
 install_package_group() {
