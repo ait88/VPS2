@@ -40,7 +40,20 @@ install_packages() {
     install_package_group "Security packages" \
         fail2ban certbot python3-certbot-nginx ufw
     
-    # Rest of installation...
+    show_progress 6 8 "Installing WP-CLI"
+    install_wp_cli
+    
+    show_progress 7 8 "Configuring PHP defaults"
+    configure_php_defaults "$php_version"
+    
+    show_progress 8 8 "Enabling services"
+    enable_services "$php_version"
+    
+    # Verify installation
+    verify_installation "$php_version"
+    
+    save_state "PACKAGES_INSTALLED" "true"
+    success "✓ All packages installed successfully"
 }
 
 install_critical_packages() {
