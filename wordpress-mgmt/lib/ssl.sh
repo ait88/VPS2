@@ -84,13 +84,6 @@ setup_letsencrypt() {
     
     info "Setting up Let's Encrypt SSL certificate..."
     
-    # Ensure nginx config allows acme-challenge access
-    fix_acme_challenge_access
-    
-    # Prepare domain list
-    local domains="-d $domain"
-    [ "$include_www" = "true" ] && domains="$domains -d www.$domain"
-    
     # Check if certificate already exists
     if [ -d "/etc/letsencrypt/live/$domain" ]; then
         info "Certificate already exists for $domain"
@@ -99,6 +92,20 @@ setup_letsencrypt() {
         fi
         update_nginx_ssl "$domain" "letsencrypt"
         return 0
+    fi
+    
+    # Prepare domain list - conditionally include www
+    local domains="-d $domain"
+    if [ "$include_www" = "true" ]; then
+        # Check if www subdomain resolves before including it
+        if dig +short "www.$domain" | grep -q "$(dig +short "$domain")"; then
+            domains="$domains -d www.$domain"
+            info "Including www.$domain in certificate (DNS resolves correctly)"
+        else
+            warning "Skipping www.$domain - DNS does not resolve to same IP as $domain"
+            # Update state to reflect reality
+            save_state "INCLUDE_WWW" "false"
+        fi
     fi
     
     # WAF considerations
@@ -110,10 +117,10 @@ setup_letsencrypt() {
         fi
     fi
     
-    # Obtain certificate
+    # Obtain certificate - nginx config should already be correct for ACME
     info "Obtaining Let's Encrypt certificate..."
     
-    # Use webroot method for better WAF compatibility
+    # Use webroot method - ACME challenge location is already configured correctly
     sudo certbot certonly \
         --webroot \
         --webroot-path "$(load_state "WP_ROOT")" \
