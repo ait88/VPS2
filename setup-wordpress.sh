@@ -202,6 +202,10 @@ mode_fresh_install() {
     setup_database
     configure_nginx
     install_wordpress
+    verify_wordpress_installation || {
+        error "WordPress installation failed verification"
+        exit 1
+    }
     setup_ssl
     apply_security
     setup_backup_system
