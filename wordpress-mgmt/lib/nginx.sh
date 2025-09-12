@@ -362,6 +362,16 @@ $(generate_admin_restrictions "$waf_type")
     }
 }
 EOF
+
+# Ensure ACME challenge directory exists
+local wp_root=$(load_state "WP_ROOT")
+local wp_user=$(load_state "WP_USER")
+
+sudo mkdir -p "$wp_root/.well-known/acme-challenge/"
+sudo chown -R "$wp_user:wordpress" "$wp_root/.well-known/"
+sudo chmod -R 755 "$wp_root/.well-known/"
+debug "ACME challenge directory prepared"
+
 }
 
 generate_admin_restrictions() {
