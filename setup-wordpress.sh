@@ -312,6 +312,12 @@ nuke_complete_system() {
             sudo userdel -r "$user" 2>/dev/null || true
         fi
     done
+
+    # Clean up package state overrides to prevent reinstall issues
+    info "Cleaning up package state overrides..."
+    sudo dpkg-statoverride --list | grep -E "(redis|mysql|php)" | while read perm owner group path; do
+    sudo dpkg-statoverride --remove "$path" 2>/dev/null || true
+    done
     
     # Remove SSL certificates
     info "Removing SSL certificates..."
