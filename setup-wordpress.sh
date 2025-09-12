@@ -305,6 +305,11 @@ nuke_complete_system() {
     sudo rm -rf /etc/mysql
     sudo rm -f /etc/init.d/mysql
     sudo rm -f /etc/logrotate.d/mysql-server
+
+    # Remove database state completely
+    info "Clearing database state..."
+    remove_state "DATABASE_CONFIGURED"
+    remove_state "DB_ROOT_PASS"
     
     # Remove WordPress files
     if [ -n "$wp_root" ] && [ -d "$wp_root" ]; then
