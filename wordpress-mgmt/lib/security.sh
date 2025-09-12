@@ -471,6 +471,30 @@ generate_security_report() {
     info "Security report saved to: $report_file"
 }
 
+show_completion_summary() {
+    local domain=$(load_state "DOMAIN")
+    local wp_root=$(load_state "WP_ROOT")
+    
+    echo
+    success "=== WordPress Installation Complete ==="
+    echo
+    echo "Site Details:"
+    echo "  URL: https://$domain"
+    echo "  WordPress Root: $wp_root"
+    echo "  Admin Area: https://$domain/wp-admin"
+    echo
+    echo "Next Steps:"
+    echo "  1. Visit https://$domain to complete WordPress setup"
+    echo "  2. Configure WordPress admin user and site settings"
+    echo "  3. Review security settings in wp-admin"
+    echo
+    echo "Management:"
+    echo "  • Run './setup-wordpress.sh' for management menus"
+    echo "  • View logs: tail -f $LOG_FILE"
+    echo "  • Security audit: ./wp-security-audit.sh"
+    echo
+}
+
 # Additional security functions
 check_security_status() {
     info "=== Security Status Check ==="
