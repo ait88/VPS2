@@ -278,8 +278,9 @@ $(generate_waf_restrictions_http "$waf_type")
 
 # HTTPS Server Block - Main WordPress configuration  
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
     server_name $server_names;
     
     root $wp_root;
