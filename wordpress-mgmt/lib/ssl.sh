@@ -156,6 +156,67 @@ setup_letsencrypt() {
     fi
 }
 
+setup_cloudflare_origin_ssl() {
+    local domain=$1
+    local include_www=$(load_state "INCLUDE_WWW" "true")
+    
+    info "Setting up Cloudflare Origin Certificate..."
+    
+    # Check if already exists
+    if [ -f "/etc/ssl/certs/${domain}-origin.crt" ]; then
+        info "Origin certificate already exists"
+        update_nginx_ssl "$domain" "cloudflare_origin"
+        return 0
+    fi
+    
+    echo
+    echo "To use Cloudflare Origin Certificates:"
+    echo "1. Go to Cloudflare Dashboard → SSL/TLS → Origin Server"
+    echo "2. Click 'Create Certificate'"
+    echo "3. Select 'Let Cloudflare generate a private key and a CSR'"
+    echo "4. Add hostnames: $domain$([ "$include_www" = "true" ] && echo ", www.$domain")"
+    echo "5. Choose 'RSA (2048)' key type"
+    echo "6. Set validity to 15 years"
+    echo "7. Copy the certificate and private key"
+    echo
+    
+    # Get certificate from user
+    echo "Paste the Origin Certificate (including -----BEGIN/END lines):"
+    echo "Press Ctrl+D when finished:"
+    local cert_content
+    cert_content=$(cat)
+    
+    echo
+    echo "Paste the Private Key (including -----BEGIN/END lines):"
+    echo "Press Ctrl+D when finished:"
+    local key_content
+    key_content=$(cat)
+    
+    # Validate content
+    if [[ ! "$cert_content" =~ "-----BEGIN CERTIFICATE-----" ]] || [[ ! "$key_content" =~ "-----BEGIN PRIVATE KEY-----" ]]; then
+        error "Invalid certificate or key format"
+        return 1
+    fi
+    
+    # Save certificate and key
+    echo "$cert_content" | sudo tee "/etc/ssl/certs/${domain}-origin.crt" >/dev/null
+    echo "$key_content" | sudo tee "/etc/ssl/private/${domain}-origin.key" >/dev/null
+    
+    # Set permissions
+    sudo chmod 644 "/etc/ssl/certs/${domain}-origin.crt"
+    sudo chmod 600 "/etc/ssl/private/${domain}-origin.key"
+    
+    # Download Cloudflare Origin CA root (for authenticated origin pulls)
+    if [ "$(load_state "CF_AUTH_ORIGIN_PULLS")" = "true" ]; then
+        sudo curl -fsSL -o /etc/nginx/cloudflare-origin-pull-ca.pem \
+            https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem
+        sudo chmod 644 /etc/nginx/cloudflare-origin-pull-ca.pem
+    fi
+    
+    update_nginx_ssl "$domain" "cloudflare_origin"
+    success "Cloudflare Origin Certificate installed"
+}
+
 setup_selfsigned() {
     local domain=$1
     
