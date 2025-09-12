@@ -274,23 +274,21 @@ install_default_plugins() {
         return 0
     fi
     
+    # Check if WordPress is installed (database tables exist)
+    if ! sudo -u "$wp_user" wp core is-installed --path="$wp_root" 2>/dev/null; then
+        warning "WordPress not yet installed - deferring plugin installation"
+        info "Install plugins manually after WordPress setup: wp plugin install $plugins"
+        return 0
+    fi
+    
     info "Installing default plugins..."
     
-    # Install plugins using WP-CLI as wp_user
     for plugin in $plugins; do
         info "Installing plugin: $plugin"
         sudo -u "$wp_user" wp plugin install "$plugin" --path="$wp_root" || {
             warning "Failed to install plugin: $plugin"
         }
     done
-    
-    # Special handling for Redis cache
-    if [[ "$plugins" =~ "redis-cache" ]] && [ "$(load_state "ENABLE_REDIS")" = "true" ]; then
-        # Enable Redis object cache
-        sudo -u "$wp_user" wp redis enable --path="$wp_root" || {
-            warning "Failed to enable Redis object cache"
-        }
-    fi
 }
 
 finalize_wordpress_install() {
