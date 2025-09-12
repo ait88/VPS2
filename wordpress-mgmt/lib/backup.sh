@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/backup.sh - Backup system configuration
-# Version: 3.0.0
+# Version: 3.0.1
 
 setup_backup_system() {
     info "Setting up backup system..."
@@ -65,7 +65,7 @@ install_backup_scripts() {
     
     info "Installing backup scripts..."
     
-    # Main backup script - FIX: Use double quotes to allow variable substitution
+    # Main backup script
     sudo tee "/home/$backup_user/backup-wordpress.sh" >/dev/null <<EOF
 #!/bin/bash
 # WordPress Backup Script
@@ -179,85 +179,80 @@ mysqldump --defaults-file=/home/$backup_user/.my.cnf \\
 echo "Quick backup saved to: \$BACKUP_FILE"
 EOF
     
-    # Set permissions
-    sudo chown "$backup_user:$backup_user" /home/$backup_user/*.sh
-    sudo chmod 750 /home/$backup_user/*.sh
-}
-    
     # Restore script
-    sudo tee "/home/$backup_user/restore-wordpress.sh" >/dev/null <<'EOF'
+    sudo tee "/home/$backup_user/restore-wordpress.sh" >/dev/null <<EOF
 #!/bin/bash
 # WordPress Restore Script
 
 set -euo pipefail
 
-if [ $# -ne 1 ]; then
-    echo "Usage: $0 <backup-file.tar.gz>"
+if [ \$# -ne 1 ]; then
+    echo "Usage: \$0 <backup-file.tar.gz>"
     exit 1
 fi
 
-BACKUP_FILE="$1"
-WP_ROOT="'$wp_root'"
-DB_NAME="'$db_name'"
-TEMP_DIR="/tmp/restore-$$"
+BACKUP_FILE="\$1"
+WP_ROOT="$wp_root"
+DB_NAME="$db_name"
+TEMP_DIR="/tmp/restore-\$\$"
 
-if [ ! -f "$BACKUP_FILE" ]; then
-    echo "Backup file not found: $BACKUP_FILE"
+if [ ! -f "\$BACKUP_FILE" ]; then
+    echo "Backup file not found: \$BACKUP_FILE"
     exit 1
 fi
 
-echo "Restoring from: $BACKUP_FILE"
+echo "Restoring from: \$BACKUP_FILE"
 echo "WARNING: This will overwrite current WordPress installation!"
 read -p "Continue? [y/N]: " confirm
 
-if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+if [[ ! "\$confirm" =~ ^[Yy]\$ ]]; then
     echo "Restore cancelled"
     exit 0
 fi
 
 # Create temp directory
-mkdir -p "$TEMP_DIR"
-trap 'rm -rf "$TEMP_DIR"' EXIT
+mkdir -p "\$TEMP_DIR"
+trap 'rm -rf "\$TEMP_DIR"' EXIT
 
 # Extract backup
 echo "Extracting backup..."
-tar -xzf "$BACKUP_FILE" -C "$TEMP_DIR"
+tar -xzf "\$BACKUP_FILE" -C "\$TEMP_DIR"
 
 # Find extracted directory
-EXTRACT_DIR=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "*_backup_*" | head -1)
+EXTRACT_DIR=\$(find "\$TEMP_DIR" -maxdepth 1 -type d -name "*_backup_*" | head -1)
 
-if [ -z "$EXTRACT_DIR" ]; then
+if [ -z "\$EXTRACT_DIR" ]; then
     echo "Invalid backup format"
     exit 1
 fi
 
 # Restore database
-if [ -f "$EXTRACT_DIR/db.sql.gz" ]; then
+if [ -f "\$EXTRACT_DIR/db.sql.gz" ]; then
     echo "Restoring database..."
-    gunzip -c "$EXTRACT_DIR/db.sql.gz" | mysql "$DB_NAME"
-elif [ -f "$EXTRACT_DIR/db.sql" ]; then
-    mysql "$DB_NAME" < "$EXTRACT_DIR/db.sql"
+    gunzip -c "\$EXTRACT_DIR/db.sql.gz" | mysql "\$DB_NAME"
+elif [ -f "\$EXTRACT_DIR/db.sql" ]; then
+    mysql "\$DB_NAME" < "\$EXTRACT_DIR/db.sql"
 else
     echo "No database backup found"
 fi
 
 # Restore wp-content
-if [ -d "$EXTRACT_DIR/wp-content" ]; then
+if [ -d "\$EXTRACT_DIR/wp-content" ]; then
     echo "Restoring wp-content..."
-    rsync -a --delete "$EXTRACT_DIR/wp-content/" "$WP_ROOT/wp-content/"
+    rsync -a --delete "\$EXTRACT_DIR/wp-content/" "\$WP_ROOT/wp-content/"
 fi
 
 # Restore wp-config.php
-if [ -f "$EXTRACT_DIR/wp-config.php" ]; then
+if [ -f "\$EXTRACT_DIR/wp-config.php" ]; then
     echo "Restoring configuration..."
-    cp "$EXTRACT_DIR/wp-config.php" "$WP_ROOT/wp-config.php"
+    cp "\$EXTRACT_DIR/wp-config.php" "\$WP_ROOT/wp-config.php"
 fi
 
 echo "Restore completed successfully"
 echo "Please verify your site is working correctly"
 EOF
     
-    # Set permissions
+    # Set permissions for all scripts
     sudo chown "$backup_user:$backup_user" /home/$backup_user/*.sh
     sudo chmod 750 /home/$backup_user/*.sh
 }
