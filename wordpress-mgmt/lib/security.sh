@@ -486,15 +486,22 @@ show_completion_summary() {
     echo "  WordPress Root: $wp_root"
     echo "  Admin Area: https://$domain/wp-admin"
     echo
+    echo "Security Status:"
+    echo "  • WAF Protection: $(load_state "WAF_TYPE")"
+    echo "  • SSL Certificate: $(load_state "SSL_TYPE")"
+    echo "  • Firewall: Active (Cloudflare IPs only)"
+    echo "  • Fail2ban: Monitoring WordPress"
+    echo
     echo "Next Steps:"
     echo "  1. Visit https://$domain to complete WordPress setup"
-    echo "  2. Configure WordPress admin user and site settings"
-    echo "  3. Review security settings in wp-admin"
+    echo "  2. Configure WordPress admin user and site settings"  
+    echo "  3. Install/configure plugins as needed"
     echo
     echo "Management:"
     echo "  • Run './setup-wordpress.sh' for management menus"
-    echo "  • View logs: tail -f $LOG_FILE"
+    echo "  • View logs: tail -f $(load_state "LOG_FILE" "$WP_MGMT_DIR/setup.log")"
     echo "  • Security audit: ./wp-security-audit.sh"
+    echo "  • Backup status: sudo -u wp-backup ls -la /home/wp-backup/backups/"
     echo
 }
 
