@@ -6,15 +6,14 @@ install_wordpress() {
     info "Installing WordPress..."
     
     if state_exists "WORDPRESS_INSTALLED"; then
-        info "✓ WordPress already installed"
-        return 0
-    fi
-    
-    local wp_version=$(load_state "WP_VERSION" "latest")
-    
-    if [ "$wp_version" = "skip" ]; then
-        info "Skipping WordPress installation as requested"
-        return 0
+        # Verify existing installation
+        if verify_wordpress_installation; then
+            info "✓ WordPress already installed and verified"
+            return 0
+        else
+            warning "WordPress marked as installed but verification failed - reinstalling"
+            remove_state "WORDPRESS_INSTALLED"
+        fi
     fi
     
     # Installation steps
@@ -35,6 +34,9 @@ install_wordpress() {
     
     show_progress 6 6 "Finalizing installation"
     finalize_wordpress_install
+
+    show_progress 6 7 "Verifying installation"
+    verify_wordpress_installation
     
     # Ensure consistent permissions after WordPress setup
     ensure_wordpress_permissions
