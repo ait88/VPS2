@@ -95,11 +95,16 @@ install_optional_packages() {
     # These packages enhance functionality but aren't required
     local optional_packages=(
         "rsync" "git" "htop" "iotop" "ncdu"
-        "build-essential" "software-properties-common"
+        "build-essential"
         "php${php_version}-imagick"
         "php${php_version}-intl" "php${php_version}-bcmath"
         "redis-server"
     )
+    
+    # Check if software-properties-common is already installed
+    if ! dpkg -l | grep -q "^ii  software-properties-common"; then
+        optional_packages+=("software-properties-common")
+    fi
     
     local failed_optional=()
     
