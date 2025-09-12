@@ -273,6 +273,10 @@ update_nginx_ssl() {
             cert_path="/etc/ssl/certs/${domain}.crt"
             key_path="/etc/ssl/private/${domain}.key"
             ;;
+        "cloudflare_origin")
+            cert_path="/etc/ssl/certs/${domain}-origin.crt"
+            key_path="/etc/ssl/private/${domain}-origin.key"
+            ;;
     esac
     
     # Update SSL certificate paths
