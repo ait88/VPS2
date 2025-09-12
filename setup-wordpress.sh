@@ -1,6 +1,6 @@
 #!/bin/bash
 # setup-wordpress.sh - Modular WordPress Installation Manager
-# Version: 3.0.0
+# Version: 3.0.1
 # GitHub: https://github.com/ait88/VPS2
 
 set -euo pipefail
@@ -205,6 +205,14 @@ mode_fresh_install() {
     setup_ssl
     apply_security
     setup_backup_system
+    
+    # Load security module if not already loaded
+    if ! command -v show_completion_summary >/dev/null 2>&1; then
+        load_module "security.sh" || {
+            error "Failed to load security module for completion summary"
+            exit 1
+        }
+    fi
     
     success "WordPress installation completed successfully!"
     show_completion_summary
