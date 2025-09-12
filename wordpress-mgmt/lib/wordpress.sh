@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.0
+# Version: 3.0.1
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -298,45 +298,39 @@ finalize_wordpress_install() {
     
     info "Finalizing WordPress installation..."
     
-    # Create .htaccess for pretty permalinks
-    sudo tee "$wp_root/.htaccess" >/dev/null <<'EOF'
-# BEGIN WordPress
-<IfModule mod_rewrite.c>
-RewriteEngine On
-RewriteBase /
-RewriteRule ^index\.php$ - [L]
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule . /index.php [L]
-</IfModule>
-# END WordPress
-
-# Security headers
-<IfModule mod_headers.c>
-    Header set X-Content-Type-Options "nosniff"
-    Header set X-Frame-Options "SAMEORIGIN"
-    Header set X-XSS-Protection "1; mode=block"
-</IfModule>
-
-# Protect wp-config.php
-<files wp-config.php>
-    order allow,deny
-    deny from all
-</files>
-
-# Disable directory browsing
-Options -Indexes
-
-# Block access to sensitive files
-<FilesMatch "^\.">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
-EOF
-    
-    # Set correct permissions on .htaccess
-    sudo chown $(load_state "WP_USER"):$(load_state "PHP_USER") "$wp_root/.htaccess"
-    sudo chmod 644 "$wp_root/.htaccess"
+    # Create database tables if they don't exist
+    local wp_user=$(load_state "WP_USER")
+    if ! sudo -u "$wp_user" wp core is-installed --path="$wp_root" 2>/dev/null; then
+        info "Creating WordPress database tables..."
+        
+        # Generate secure admin password
+        local admin_pass=$(generate_password 16)
+        save_state "WP_ADMIN_PASS" "$admin_pass"
+        
+        # Install WordPress database
+        sudo -u "$wp_user" wp core install \
+            --url="https://$domain" \
+            --title="WordPress Site" \
+            --admin_user="admin" \
+            --admin_password="$admin_pass" \
+            --admin_email="$admin_email" \
+            --path="$wp_root"
+        
+        info "WordPress admin credentials:"
+        info "  Username: admin"
+        info "  Password: $admin_pass"
+        info "  Email: $admin_email"
+        
+        # Install selected plugins
+        local plugins=$(load_state "WP_PLUGINS")
+        if [ -n "$plugins" ]; then
+            info "Installing selected plugins: $plugins"
+            sudo -u "$wp_user" wp plugin install $plugins --path="$wp_root"
+            sudo -u "$wp_user" wp plugin activate $plugins --path="$wp_root"
+        fi
+    else
+        info "WordPress database tables already exist"
+    fi
     
     # Create robots.txt
     sudo tee "$wp_root/robots.txt" >/dev/null <<EOF
@@ -359,6 +353,43 @@ EOF
     
     info "WordPress installation ready for final setup via browser"
     info "Visit https://$domain to complete installation"
+}
+
+verify_wordpress_installation() {
+    local wp_root=$(load_state "WP_ROOT")
+    local wp_user=$(load_state "WP_USER")
+    local domain=$(load_state "DOMAIN")
+    
+    info "Verifying WordPress installation..."
+    
+    # Check core files exist
+    if [ ! -f "$wp_root/wp-login.php" ] || [ ! -f "$wp_root/wp-config.php" ]; then
+        error "WordPress core files missing"
+        return 1
+    fi
+    
+    # Check database tables exist
+    if ! sudo -u "$wp_user" wp db tables --path="$wp_root" >/dev/null 2>&1; then
+        error "WordPress database tables missing"
+        return 1
+    fi
+    
+    # Check WordPress can connect to database
+    if ! sudo -u "$wp_user" wp db check --path="$wp_root" >/dev/null 2>&1; then
+        error "WordPress database connection failed"
+        return 1
+    fi
+    
+    # Check site URL configuration
+    local site_url=$(sudo -u "$wp_user" wp option get siteurl --path="$wp_root" 2>/dev/null)
+    if [ "$site_url" != "https://$domain" ]; then
+        warning "Site URL mismatch: $site_url vs https://$domain"
+        sudo -u "$wp_user" wp option update siteurl "https://$domain" --path="$wp_root"
+        sudo -u "$wp_user" wp option update home "https://$domain" --path="$wp_root"
+    fi
+    
+    success "WordPress installation verified"
+    return 0
 }
 
 # Import existing WordPress site
