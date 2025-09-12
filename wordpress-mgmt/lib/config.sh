@@ -113,7 +113,8 @@ configure_interactive() {
     
     PS3="Select SSL configuration: "
     local ssl_options=(
-        "Let's Encrypt (Recommended)"
+        "Cloudflare Origin Certificate (Recommended for CF proxy)"
+        "Let's Encrypt (Direct access only)"
         "Self-signed (Development)"
         "Manual (I'll configure later)"
         "None (HTTP only)"
@@ -121,10 +122,11 @@ configure_interactive() {
     
     select ssl_opt in "${ssl_options[@]}"; do
         case $REPLY in
-            1) save_state "SSL_TYPE" "letsencrypt"; break ;;
-            2) save_state "SSL_TYPE" "selfsigned"; break ;;
-            3) save_state "SSL_TYPE" "manual"; break ;;
-            4) save_state "SSL_TYPE" "none"; break ;;
+            1) save_state "SSL_TYPE" "cloudflare_origin"; break ;;
+            2) save_state "SSL_TYPE" "letsencrypt"; break ;;
+            3) save_state "SSL_TYPE" "selfsigned"; break ;;
+            4) save_state "SSL_TYPE" "manual"; break ;;
+            5) save_state "SSL_TYPE" "none"; break ;;
         esac
     done
     
