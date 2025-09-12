@@ -17,7 +17,20 @@ setup_ssl() {
     local domain=$(load_state "DOMAIN")
     
     case "$ssl_type" in
+        "cloudflare_origin")
+            setup_cloudflare_origin_ssl "$domain"
+            ;;
         "letsencrypt")
+            if [ "$waf_type" != "none" ]; then
+                warning "Let's Encrypt with WAF requires temporary firewall opening"
+                warning "Consider using Cloudflare Origin Certificate instead"
+                if ! confirm "Continue with Let's Encrypt anyway?" N; then
+                    info "Switching to Cloudflare Origin Certificate"
+                    save_state "SSL_TYPE" "cloudflare_origin"
+                    setup_cloudflare_origin_ssl "$domain"
+                    return
+                fi
+            fi
             setup_letsencrypt "$domain"
             ;;
         "selfsigned")
