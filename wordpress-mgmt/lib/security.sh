@@ -172,11 +172,18 @@ configure_ufw() {
             sudo ufw allow 443/tcp comment "HTTPS"
         fi
     else
-        # WAF restricted access
+        # WAF restricted access - REMOVE any general allow rules
+        info "Removing general HTTP/HTTPS access (WAF protection)..."
+        sudo ufw delete allow 80/tcp 2>/dev/null || true
+        sudo ufw delete allow 443/tcp 2>/dev/null || true
+        sudo ufw delete allow 80 2>/dev/null || true  
+        sudo ufw delete allow 443 2>/dev/null || true
+        
+        # Add WAF-specific rules
         local waf_ips=$(load_state "WAF_IPS")
         
         if [ "$waf_type" = "cloudflare" ] || [ "$waf_type" = "cloudflare_ent" ]; then
-            # Fetch and allow Cloudflare IPs
+            # Fetch and allow Cloudflare IPs ONLY
             info "Adding Cloudflare IP ranges to firewall..."
             
             # IPv4
@@ -184,21 +191,17 @@ configure_ufw() {
                 sudo ufw allow from "$ip" to any port 80,443 proto tcp comment "Cloudflare"
             done
             
-            # IPv6
+            # IPv6  
             curl -s https://www.cloudflare.com/ips-v6 | while read ip; do
                 sudo ufw allow from "$ip" to any port 80,443 proto tcp comment "Cloudflare"
             done
+            
+            info "✓ WAF protection enabled - only Cloudflare IPs allowed"
         else
             # Custom WAF IPs
             for ip in $waf_ips; do
                 sudo ufw allow from "$ip" to any port 80,443 proto tcp comment "WAF"
             done
-        fi
-        
-        # Monitoring exception
-        local monitor_ip=$(load_state "MONITOR_IP")
-        if [ -n "$monitor_ip" ]; then
-            sudo ufw allow from "$monitor_ip" to any port 80,443 proto tcp comment "Monitoring"
         fi
     fi
     
