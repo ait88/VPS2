@@ -183,6 +183,11 @@ setup_cloudflare_origin_ssl() {
     fi
     
     echo
+    warning "IMPORTANT: For Cloudflare Origin Certificates:"
+    echo "• Use exact hostname: $domain"
+    echo "• Do NOT use wildcards (*.domain.com)"
+    echo "• Include www.$domain only if you need it"
+    echo
     echo "To use Cloudflare Origin Certificates:"
     echo "1. Go to Cloudflare Dashboard → SSL/TLS → Origin Server"
     echo "2. Click 'Create Certificate'"
