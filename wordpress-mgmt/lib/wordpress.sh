@@ -17,25 +17,25 @@ install_wordpress() {
     fi
     
     # Installation steps
-    show_progress 1 6 "Downloading WordPress"
-    download_wordpress "$wp_version"
+    show_progress 1 7 "Downloading WordPress"
+    download_wordpress "$(load_state "WP_VERSION")"
     
-    show_progress 2 6 "Extracting WordPress files"
+    show_progress 2 7 "Extracting WordPress files"
     extract_wordpress
     
-    show_progress 3 6 "Configuring WordPress"
+    show_progress 3 7 "Configuring WordPress"
     configure_wordpress
     
-    show_progress 4 6 "Setting permissions"
+    show_progress 4 7 "Setting permissions"
     set_wordpress_permissions
     
-    show_progress 5 6 "Installing plugins"
+    show_progress 5 7 "Installing plugins"
     install_default_plugins
     
-    show_progress 6 6 "Finalizing installation"
+    show_progress 6 7 "Finalizing installation"
     finalize_wordpress_install
 
-    show_progress 6 7 "Verifying installation"
+    show_progress 7 7 "Verifying installation"
     verify_wordpress_installation
     
     # Ensure consistent permissions after WordPress setup
