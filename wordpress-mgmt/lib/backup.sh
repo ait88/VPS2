@@ -65,8 +65,8 @@ install_backup_scripts() {
     
     info "Installing backup scripts..."
     
-    # Main backup script
-    sudo tee "/home/$backup_user/backup-wordpress.sh" >/dev/null <<'EOF'
+    # Main backup script - FIX: Use double quotes to allow variable substitution
+    sudo tee "/home/$backup_user/backup-wordpress.sh" >/dev/null <<EOF
 #!/bin/bash
 # WordPress Backup Script
 # Performs complete WordPress backup
@@ -74,30 +74,30 @@ install_backup_scripts() {
 set -euo pipefail
 
 # Configuration
-DOMAIN="'$domain'"
-WP_ROOT="'$wp_root'"
-DB_NAME="'$db_name'"
-BACKUP_USER="'$backup_user'"
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_BASE="/home/$BACKUP_USER/backups"
-LOG_FILE="/home/$BACKUP_USER/logs/backup_${DATE}.log"
+DOMAIN="$domain"
+WP_ROOT="$wp_root"
+DB_NAME="$db_name"
+BACKUP_USER="$backup_user"
+DATE=\$(date +%Y%m%d_%H%M%S)
+BACKUP_BASE="/home/\$BACKUP_USER/backups"
+LOG_FILE="/home/\$BACKUP_USER/logs/backup_\${DATE}.log"
 
 # Logging function
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$*" | tee -a "\$LOG_FILE"
 }
 
 # Start backup
-log "Starting WordPress backup for $DOMAIN"
+log "Starting WordPress backup for \$DOMAIN"
 
 # Determine backup type (daily/weekly/monthly)
-DAY_OF_WEEK=$(date +%u)
-DAY_OF_MONTH=$(date +%d)
+DAY_OF_WEEK=\$(date +%u)
+DAY_OF_MONTH=\$(date +%d)
 
-if [ "$DAY_OF_MONTH" -eq 1 ]; then
+if [ "\$DAY_OF_MONTH" -eq 1 ]; then
     BACKUP_TYPE="monthly"
     RETENTION_DAYS=180
-elif [ "$DAY_OF_WEEK" -eq 7 ]; then
+elif [ "\$DAY_OF_WEEK" -eq 7 ]; then
     BACKUP_TYPE="weekly"
     RETENTION_DAYS=30
 else
@@ -105,79 +105,84 @@ else
     RETENTION_DAYS=7
 fi
 
-BACKUP_DIR="$BACKUP_BASE/$BACKUP_TYPE"
-BACKUP_NAME="${DOMAIN}_backup_${DATE}"
-TEMP_DIR="/tmp/$BACKUP_NAME"
+BACKUP_DIR="\$BACKUP_BASE/\$BACKUP_TYPE"
+BACKUP_NAME="\${DOMAIN}_backup_\${DATE}"
+TEMP_DIR="/tmp/\$BACKUP_NAME"
 
 # Create temporary directory
-mkdir -p "$TEMP_DIR"
-trap 'rm -rf "$TEMP_DIR"' EXIT
+mkdir -p "\$TEMP_DIR"
+trap 'rm -rf "\$TEMP_DIR"' EXIT
 
 # Backup database
 log "Backing up database..."
-/home/$BACKUP_USER/backup-database.sh > "$TEMP_DIR/db.sql"
-gzip "$TEMP_DIR/db.sql"
+/home/\$BACKUP_USER/backup-database.sh > "\$TEMP_DIR/db.sql"
+gzip "\$TEMP_DIR/db.sql"
 
 # Copy wp-config.php
 log "Copying configuration..."
-cp "$WP_ROOT/wp-config.php" "$TEMP_DIR/"
+cp "\$WP_ROOT/wp-config.php" "\$TEMP_DIR/"
 
 # Backup wp-content (excluding cache)
 log "Backing up wp-content..."
-rsync -a \
-    --exclude='cache/' \
-    --exclude='*.log' \
-    --exclude='backup-*' \
-    --exclude='upgrade/' \
-    --exclude='uploads/backup-*' \
-    "$WP_ROOT/wp-content/" "$TEMP_DIR/wp-content/"
+rsync -a \\
+    --exclude='cache/' \\
+    --exclude='*.log' \\
+    --exclude='backup-*' \\
+    --exclude='upgrade/' \\
+    --exclude='uploads/backup-*' \\
+    "\$WP_ROOT/wp-content/" "\$TEMP_DIR/wp-content/"
 
 # Create archive
 log "Creating archive..."
 cd /tmp
-tar -czf "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" "$BACKUP_NAME"
+tar -czf "\$BACKUP_DIR/\${BACKUP_NAME}.tar.gz" "\$BACKUP_NAME"
 
 # Generate checksum
-cd "$BACKUP_DIR"
-sha256sum "${BACKUP_NAME}.tar.gz" > "${BACKUP_NAME}.tar.gz.sha256"
+cd "\$BACKUP_DIR"
+sha256sum "\${BACKUP_NAME}.tar.gz" > "\${BACKUP_NAME}.tar.gz.sha256"
 
 # Clean up old backups
 log "Cleaning old backups..."
-find "$BACKUP_DIR" -name "${DOMAIN}_backup_*.tar.gz" -mtime +$RETENTION_DAYS -delete
-find "$BACKUP_DIR" -name "${DOMAIN}_backup_*.tar.gz.sha256" -mtime +$RETENTION_DAYS -delete
+find "\$BACKUP_DIR" -name "\${DOMAIN}_backup_*.tar.gz" -mtime +\$RETENTION_DAYS -delete
+find "\$BACKUP_DIR" -name "\${DOMAIN}_backup_*.tar.gz.sha256" -mtime +\$RETENTION_DAYS -delete
 
 # Report
-BACKUP_SIZE=$(du -h "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" | cut -f1)
-log "Backup completed: ${BACKUP_NAME}.tar.gz ($BACKUP_SIZE)"
+BACKUP_SIZE=\$(du -h "\$BACKUP_DIR/\${BACKUP_NAME}.tar.gz" | cut -f1)
+log "Backup completed: \${BACKUP_NAME}.tar.gz (\$BACKUP_SIZE)"
 
 # Create latest symlink for remote backup
-ln -sf "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" "$BACKUP_BASE/latest-${BACKUP_TYPE}.tar.gz"
+ln -sf "\$BACKUP_DIR/\${BACKUP_NAME}.tar.gz" "\$BACKUP_BASE/latest-\${BACKUP_TYPE}.tar.gz"
 
 # Output for remote backup system
-echo "BACKUP_FILE=$BACKUP_DIR/${BACKUP_NAME}.tar.gz"
-echo "BACKUP_SIZE=$BACKUP_SIZE"
-echo "BACKUP_TYPE=$BACKUP_TYPE"
+echo "BACKUP_FILE=\$BACKUP_DIR/\${BACKUP_NAME}.tar.gz"
+echo "BACKUP_SIZE=\$BACKUP_SIZE"
+echo "BACKUP_TYPE=\$BACKUP_TYPE"
 
 exit 0
 EOF
     
     # Quick backup script (database only)
-    sudo tee "/home/$backup_user/quick-backup.sh" >/dev/null <<'EOF'
+    sudo tee "/home/$backup_user/quick-backup.sh" >/dev/null <<EOF
 #!/bin/bash
 # Quick database backup
 
-DB_NAME="'$db_name'"
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="/home/'$backup_user'/backups/quick_db_${DATE}.sql.gz"
+DB_NAME="$db_name"
+DATE=\$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="/home/$backup_user/backups/quick_db_\${DATE}.sql.gz"
 
-mysqldump --defaults-file=/home/'$backup_user'/.my.cnf \
-    --single-transaction \
-    --routines \
-    --triggers \
-    "$DB_NAME" | gzip > "$BACKUP_FILE"
+mysqldump --defaults-file=/home/$backup_user/.my.cnf \\
+    --single-transaction \\
+    --routines \\
+    --triggers \\
+    "\$DB_NAME" | gzip > "\$BACKUP_FILE"
 
-echo "Quick backup saved to: $BACKUP_FILE"
+echo "Quick backup saved to: \$BACKUP_FILE"
 EOF
+    
+    # Set permissions
+    sudo chown "$backup_user:$backup_user" /home/$backup_user/*.sh
+    sudo chmod 750 /home/$backup_user/*.sh
+}
     
     # Restore script
     sudo tee "/home/$backup_user/restore-wordpress.sh" >/dev/null <<'EOF'
