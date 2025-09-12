@@ -117,6 +117,17 @@ setup_letsencrypt() {
         fi
     fi
     
+    # Ensure ACME challenge directory exists (defensive programming)
+    local wp_root=$(load_state "WP_ROOT")
+    local wp_user=$(load_state "WP_USER")
+
+    if [ ! -d "$wp_root/.well-known/acme-challenge" ]; then
+        info "Creating ACME challenge directory..."
+        sudo mkdir -p "$wp_root/.well-known/acme-challenge/"
+        sudo chown -R "$wp_user:wordpress" "$wp_root/.well-known/"
+        sudo chmod -R 755 "$wp_root/.well-known/"
+    fi
+
     # Obtain certificate - nginx config should already be correct for ACME
     info "Obtaining Let's Encrypt certificate..."
     
