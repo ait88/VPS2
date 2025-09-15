@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/backup.sh - Backup system configuration
-# Version: 3.0.2
+# Version: 3.0.3
 
 setup_backup_system() {
     info "Setting up backup system..."
@@ -65,39 +65,87 @@ install_backup_scripts() {
     
     info "Installing backup scripts..."
     
-    # Main backup script with proper variable expansion
-    sudo tee "/home/$backup_user/backup-wordpress.sh" >/dev/null <<EOF
+    # Database backup script with proper variable handling
+    sudo tee "/home/$backup_user/backup-database.sh" >/dev/null <<'EOF'
 #!/bin/bash
-# WordPress Backup Script
-# Performs complete WordPress backup
+# Database backup script - variables loaded from environment
 
-set -euo pipefail
+# Load configuration from state file
+if [ -f "/home/wp-backup/.backup_config" ]; then
+    source "/home/wp-backup/.backup_config"
+else
+    echo "Configuration file not found" >&2
+    exit 1
+fi
 
-# Configuration
+DATE=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="$BACKUP_DIR/db_${DB_NAME}_${DATE}.sql.gz"
+
+# Create backup with explicit database specification
+mysqldump --defaults-file="$HOME/.my.cnf" \
+    --single-transaction \
+    --routines \
+    --triggers \
+    --events \
+    --databases "$DB_NAME" | gzip > "$BACKUP_FILE"
+
+# Keep only last 7 days of backups
+find "$BACKUP_DIR" -name "db_${DB_NAME}_*.sql.gz" -mtime +7 -delete
+
+# Output backup file path for remote backup system
+echo "$BACKUP_FILE"
+EOF
+
+    # Create configuration file for backup scripts
+    sudo tee "/home/$backup_user/.backup_config" >/dev/null <<EOF
+# Backup configuration - sourced by backup scripts
 DOMAIN="$domain"
 WP_ROOT="$wp_root"
 DB_NAME="$db_name"
 BACKUP_USER="$backup_user"
-DATE=\$(date +%Y%m%d_%H%M%S)
-BACKUP_BASE="/home/\$BACKUP_USER/backups"
-LOG_FILE="/home/\$BACKUP_USER/logs/backup_\${DATE}.log"
+BACKUP_DIR="/home/$backup_user/db-backups"
+EOF
+
+    # Main backup script with proper variable handling
+    sudo tee "/home/$backup_user/backup-wordpress.sh" >/dev/null <<'EOF'
+#!/bin/bash
+# WordPress Backup Script
+set -euo pipefail
+
+# Load configuration
+if [ -f "$HOME/.backup_config" ]; then
+    source "$HOME/.backup_config"
+else
+    echo "Configuration file not found" >&2
+    exit 1
+fi
+
+# Set working directory to user home to avoid getcwd errors
+cd "$HOME"
+
+DATE=$(date +%Y%m%d_%H%M%S)
+BACKUP_BASE="$HOME/backups"
+LOG_FILE="$HOME/logs/backup_${DATE}.log"
+
+# Ensure log directory exists
+mkdir -p "$(dirname "$LOG_FILE")"
 
 # Logging function
 log() {
-    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$*" | tee -a "\$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
 }
 
 # Start backup
-log "Starting WordPress backup for \$DOMAIN"
+log "Starting WordPress backup for $DOMAIN"
 
 # Determine backup type (daily/weekly/monthly)
-DAY_OF_WEEK=\$(date +%u)
-DAY_OF_MONTH=\$(date +%d)
+DAY_OF_WEEK=$(date +%u)
+DAY_OF_MONTH=$(date +%d)
 
-if [ "\$DAY_OF_MONTH" -eq 1 ]; then
+if [ "$DAY_OF_MONTH" -eq 1 ]; then
     BACKUP_TYPE="monthly"
     RETENTION_DAYS=180
-elif [ "\$DAY_OF_WEEK" -eq 7 ]; then
+elif [ "$DAY_OF_WEEK" -eq 7 ]; then
     BACKUP_TYPE="weekly"
     RETENTION_DAYS=30
 else
@@ -105,44 +153,47 @@ else
     RETENTION_DAYS=7
 fi
 
-BACKUP_DIR="\$BACKUP_BASE/\$BACKUP_TYPE"
-BACKUP_NAME="\${DOMAIN}_backup_\${DATE}"
-TEMP_DIR="/tmp/\$BACKUP_NAME"
+BACKUP_DIR="$BACKUP_BASE/$BACKUP_TYPE"
+BACKUP_NAME="${DOMAIN}_backup_${DATE}"
+TEMP_DIR="/tmp/$BACKUP_NAME"
 
 # Create temporary directory
-mkdir -p "\$TEMP_DIR"
-trap 'rm -rf "\$TEMP_DIR"' EXIT
+mkdir -p "$TEMP_DIR"
+trap 'rm -rf "$TEMP_DIR"' EXIT
 
 # Backup database
 log "Backing up database..."
-/home/\$BACKUP_USER/backup-database.sh > "\$TEMP_DIR/db.sql"
-if [ \$? -eq 0 ]; then
-    gzip "\$TEMP_DIR/db.sql"
+if "$HOME/backup-database.sh" > "$TEMP_DIR/db.sql"; then
+    gzip "$TEMP_DIR/db.sql"
     log "Database backup completed"
 else
     log "Database backup failed"
     exit 1
 fi
 
-# Copy wp-config.php
+# Copy configuration (with sudo for access)
 log "Copying configuration..."
-if [ -f "\$WP_ROOT/wp-config.php" ]; then
-    cp "\$WP_ROOT/wp-config.php" "\$TEMP_DIR/"
+if sudo cp "$WP_ROOT/wp-config.php" "$TEMP_DIR/" 2>/dev/null; then
+    log "Configuration copied"
 else
-    log "wp-config.php not found"
+    log "Failed to copy wp-config.php"
     exit 1
 fi
 
-# Backup wp-content (excluding cache)
+# Backup wp-content (with sudo for access)
 log "Backing up wp-content..."
-if [ -d "\$WP_ROOT/wp-content" ]; then
-    rsync -a \\
-        --exclude='cache/' \\
-        --exclude='*.log' \\
-        --exclude='backup-*' \\
-        --exclude='upgrade/' \\
-        --exclude='uploads/backup-*' \\
-        "\$WP_ROOT/wp-content/" "\$TEMP_DIR/wp-content/"
+if [ -d "$WP_ROOT/wp-content" ]; then
+    sudo rsync -a \
+        --exclude='cache/' \
+        --exclude='*.log' \
+        --exclude='backup-*' \
+        --exclude='upgrade/' \
+        --exclude='uploads/backup-*' \
+        "$WP_ROOT/wp-content/" "$TEMP_DIR/wp-content/"
+    
+    # Fix ownership of copied files
+    sudo chown -R "$BACKUP_USER:$BACKUP_USER" "$TEMP_DIR/wp-content/"
+    log "wp-content backup completed"
 else
     log "wp-content directory not found"
     exit 1
@@ -151,127 +202,39 @@ fi
 # Create archive
 log "Creating archive..."
 cd /tmp
-tar -czf "\$BACKUP_DIR/\${BACKUP_NAME}.tar.gz" "\$BACKUP_NAME"
+tar -czf "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" "$BACKUP_NAME"
 
 # Generate checksum
-cd "\$BACKUP_DIR"
-sha256sum "\${BACKUP_NAME}.tar.gz" > "\${BACKUP_NAME}.tar.gz.sha256"
+cd "$BACKUP_DIR"
+sha256sum "${BACKUP_NAME}.tar.gz" > "${BACKUP_NAME}.tar.gz.sha256"
 
 # Clean up old backups
 log "Cleaning old backups..."
-find "\$BACKUP_DIR" -name "\${DOMAIN}_backup_*.tar.gz" -mtime +\$RETENTION_DAYS -delete
-find "\$BACKUP_DIR" -name "\${DOMAIN}_backup_*.tar.gz.sha256" -mtime +\$RETENTION_DAYS -delete
+find "$BACKUP_DIR" -name "${DOMAIN}_backup_*.tar.gz" -mtime +$RETENTION_DAYS -delete
+find "$BACKUP_DIR" -name "${DOMAIN}_backup_*.tar.gz.sha256" -mtime +$RETENTION_DAYS -delete
 
 # Report
-BACKUP_SIZE=\$(du -h "\$BACKUP_DIR/\${BACKUP_NAME}.tar.gz" | cut -f1)
-log "Backup completed: \${BACKUP_NAME}.tar.gz (\$BACKUP_SIZE)"
+BACKUP_SIZE=$(du -h "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" | cut -f1)
+log "Backup completed: ${BACKUP_NAME}.tar.gz ($BACKUP_SIZE)"
 
 # Create latest symlink for remote backup
-ln -sf "\$BACKUP_DIR/\${BACKUP_NAME}.tar.gz" "\$BACKUP_BASE/latest-\${BACKUP_TYPE}.tar.gz"
+ln -sf "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" "$BACKUP_BASE/latest-${BACKUP_TYPE}.tar.gz"
 
 # Output for remote backup system
-echo "BACKUP_FILE=\$BACKUP_DIR/\${BACKUP_NAME}.tar.gz"
-echo "BACKUP_SIZE=\$BACKUP_SIZE"
-echo "BACKUP_TYPE=\$BACKUP_TYPE"
+echo "BACKUP_FILE=$BACKUP_DIR/${BACKUP_NAME}.tar.gz"
+echo "BACKUP_SIZE=$BACKUP_SIZE"
+echo "BACKUP_TYPE=$BACKUP_TYPE"
 
 exit 0
 EOF
-    
-    # Quick backup script with proper variable expansion
-    sudo tee "/home/$backup_user/quick-backup.sh" >/dev/null <<EOF
-#!/bin/bash
-# Quick database backup
 
-DB_NAME="$db_name"
-DATE=\$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="/home/$backup_user/backups/quick_db_\${DATE}.sql.gz"
-
-mysqldump --defaults-file=/home/$backup_user/.my.cnf \\
-    --single-transaction \\
-    --routines \\
-    --triggers \\
-    "\$DB_NAME" | gzip > "\$BACKUP_FILE"
-
-echo "Quick backup saved to: \$BACKUP_FILE"
-EOF
-    
-    # Restore script
-    sudo tee "/home/$backup_user/restore-wordpress.sh" >/dev/null <<EOF
-#!/bin/bash
-# WordPress Restore Script
-
-set -euo pipefail
-
-if [ \$# -ne 1 ]; then
-    echo "Usage: \$0 <backup-file.tar.gz>"
-    exit 1
-fi
-
-BACKUP_FILE="\$1"
-WP_ROOT="$wp_root"
-DB_NAME="$db_name"
-TEMP_DIR="/tmp/restore-\$\$"
-
-if [ ! -f "\$BACKUP_FILE" ]; then
-    echo "Backup file not found: \$BACKUP_FILE"
-    exit 1
-fi
-
-echo "Restoring from: \$BACKUP_FILE"
-echo "WARNING: This will overwrite current WordPress installation!"
-read -p "Continue? [y/N]: " confirm
-
-if [[ ! "\$confirm" =~ ^[Yy]\$ ]]; then
-    echo "Restore cancelled"
-    exit 0
-fi
-
-# Create temp directory
-mkdir -p "\$TEMP_DIR"
-trap 'rm -rf "\$TEMP_DIR"' EXIT
-
-# Extract backup
-echo "Extracting backup..."
-tar -xzf "\$BACKUP_FILE" -C "\$TEMP_DIR"
-
-# Find extracted directory
-EXTRACT_DIR=\$(find "\$TEMP_DIR" -maxdepth 1 -type d -name "*_backup_*" | head -1)
-
-if [ -z "\$EXTRACT_DIR" ]; then
-    echo "Invalid backup format"
-    exit 1
-fi
-
-# Restore database
-if [ -f "\$EXTRACT_DIR/db.sql.gz" ]; then
-    echo "Restoring database..."
-    gunzip -c "\$EXTRACT_DIR/db.sql.gz" | mysql "\$DB_NAME"
-elif [ -f "\$EXTRACT_DIR/db.sql" ]; then
-    mysql "\$DB_NAME" < "\$EXTRACT_DIR/db.sql"
-else
-    echo "No database backup found"
-fi
-
-# Restore wp-content
-if [ -d "\$EXTRACT_DIR/wp-content" ]; then
-    echo "Restoring wp-content..."
-    rsync -a --delete "\$EXTRACT_DIR/wp-content/" "\$WP_ROOT/wp-content/"
-fi
-
-# Restore wp-config.php
-if [ -f "\$EXTRACT_DIR/wp-config.php" ]; then
-    echo "Restoring configuration..."
-    cp "\$EXTRACT_DIR/wp-config.php" "\$WP_ROOT/wp-config.php"
-fi
-
-echo "Restore completed successfully"
-echo "Please verify your site is working correctly"
-EOF
-    
-    # Set permissions for all scripts
+    # Set permissions for all scripts and config
+    sudo chown "$backup_user:$backup_user" "/home/$backup_user"/.backup_config
+    sudo chmod 600 "/home/$backup_user"/.backup_config
     sudo chown "$backup_user:$backup_user" /home/$backup_user/*.sh
     sudo chmod 750 /home/$backup_user/*.sh
 }
+
 setup_backup_credentials() {
     local backup_user=$(load_state "BACKUP_USER")
     local admin_email=$(load_state "ADMIN_EMAIL")
