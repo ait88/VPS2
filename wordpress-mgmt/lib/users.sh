@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/users.sh - User management with security isolation
-# Version: 3.0.0
+# Version: 3.0.1
 
 setup_users() {
     info "Setting up users with security isolation..."
@@ -148,6 +148,17 @@ setup_backup_user() {
     sudo chmod 700 "$ssh_dir"
     sudo chmod 600 "$ssh_dir/authorized_keys"
     sudo chown -R "$backup_user:$backup_user" "$ssh_dir"
+    
+    # Add backup user to wordpress group for read access
+    sudo usermod -a -G wordpress "$backup_user"
+    
+    # Configure sudo access for backup operations
+    sudo tee "/etc/sudoers.d/backup-wordpress" >/dev/null <<EOF
+# Allow backup user to read WordPress files
+$backup_user ALL=(root) NOPASSWD: /bin/cp /var/www/wordpress/wp-config.php *
+$backup_user ALL=(root) NOPASSWD: /usr/bin/rsync * /var/www/wordpress/wp-content/* *
+$backup_user ALL=(root) NOPASSWD: /bin/chown -R $backup_user:$backup_user *
+EOF
     
     # Configure restricted shell for backup user
     setup_backup_restrictions "$backup_user"
