@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.6
+# Version: 3.0.7
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -489,17 +489,81 @@ download_backup_file() {
 }
 
 import_from_directory() {
-    read -p "Enter path to backup archive: " backup_path
+    echo
+    echo "You can provide either:"
+    echo "• Path to backup archive (.tar.gz file)"
+    echo "• Path to extracted backup directory"
+    echo
+    read -p "Enter path to backup archive or directory: " backup_path
     
-    if [ ! -f "$backup_path" ]; then
-        error "Archive file not found: $backup_path"
+    # Expand tilde to home directory
+    backup_path="${backup_path/#\~/$HOME}"
+    
+    # Check what the user provided
+    if [ -f "$backup_path" ]; then
+        # It's a file - check if it's an archive
+        if [[ "$backup_path" =~ \.(tar\.gz|tgz)$ ]]; then
+            info "Using archive file: $backup_path"
+            import_from_archive "$backup_path"
+        else
+            error "File must be a .tar.gz archive"
+            error "Found: $(file "$backup_path" 2>/dev/null | cut -d: -f2)"
+            return 1
+        fi
+    elif [ -d "$backup_path" ]; then
+        # It's a directory - validate backup structure
+        info "Using directory: $backup_path"
+        import_from_extracted_directory "$backup_path"
+    else
+        error "Path not found: $backup_path"
+        echo
+        echo "Please check:"
+        echo "• File/directory exists"
+        echo "• Path is correct (use tab completion)"
+        echo "• You have read permissions"
+        echo
+        echo "Example paths:"
+        echo "• ~/wordpress-mgmt/tmp/backup.tar.gz"
+        echo "• ~/wordpress-mgmt/tmp/wp-import-139285/wordpress_ssh_backup_20250915_085057"
+        return 1
+    fi
+}
+
+import_from_extracted_directory() {
+    local extract_dir=$1
+    local wp_root=$(load_state "WP_ROOT")
+    
+    info "Processing extracted backup directory..."
+    
+    # Validate backup structure
+    if ! validate_backup_structure "$extract_dir"; then
+        error "Invalid backup directory structure"
         return 1
     fi
     
-    import_from_archive "$backup_path"
+    # Process database dump
+    process_database_import "$extract_dir"
+    
+    # Process wp-content
+    process_wp_content_import "$extract_dir" "$wp_root"
+    
+    # Ensure WordPress core files are present
+    ensure_wordpress_core
+    
+    # Configure WordPress for import
+    configure_wordpress_import "$extract_dir"
+    
+    # Set permissions
+    set_wordpress_permissions
+    
+    # Update URLs if domain changed
+    update_site_urls "$extract_dir"
+    
+    save_state "WORDPRESS_INSTALLED" "true"
+    save_state "WP_INSTALL_METHOD" "import"
+    
+    success "WordPress site imported successfully from directory"
 }
-
-# SSH Import Functions - Add to wordpress-mgmt/lib/wordpress.sh
 
 # Import WordPress site via SSH
 import_from_ssh() {
