@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.3
+# Version: 3.0.4
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -801,7 +801,7 @@ create_and_transfer_backup() {
     local wp_dir=$1
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local backup_name="wordpress_ssh_backup_$timestamp"
-    local remote_backup_dir="~/backup_temp/$backup_name"
+    local remote_backup_dir="\$HOME/backup_temp/$backup_name"  # Use $HOME instead of ~
     local local_backup_file="$WP_MGMT_DIR/tmp/${backup_name}.tar.gz"
     
     # Create local tmp directory
@@ -809,43 +809,30 @@ create_and_transfer_backup() {
     
     info "Creating remote backup..."
     
-    # Ensure remote backup directory exists
-    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mkdir -p ~/backup_temp" || {
+    # Create backup directory on remote server with explicit error checking
+    if ! sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C mkdir -p \$HOME/backup_temp/$backup_name && echo 'DIR_CREATED'"; then
         error "Failed to create remote backup directory"
         return 1
-    }
+    fi
     
     # Step 1: Copy wp-config.php
     info "Copying wp-config.php..."
-    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cp '$wp_dir/wp-config.php' '$remote_backup_dir/'" || {
+    if ! sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C cp '$wp_dir/wp-config.php' '\$HOME/backup_temp/$backup_name/' && echo 'CONFIG_COPIED'"; then
         error "Failed to copy wp-config.php"
         return 1
-    }
+    fi
     
     # Step 2: Create database dump
     info "Creating database dump..."
     
     # Try WP-CLI first with progress indicator
     {
-        sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && LC_ALL=C wp db export '$remote_backup_dir/db.sql'" >/dev/null 2>&1 &
-        local db_pid=$!
-        
-        # Show activity indicator
-        while kill -0 $db_pid 2>/dev/null; do
-            echo -n "." >&2
-            sleep 2
-        done
-        echo >&2
-        
-        wait $db_pid
-        local db_status=$?
-        
-        if [ $db_status -eq 0 ]; then
+        if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' && LC_ALL=C wp db export '\$HOME/backup_temp/$backup_name/db.sql' 2>/dev/null"; then
             success "Database exported via WP-CLI"
         else
             # Try mysqldump as fallback
             info "WP-CLI failed, trying mysqldump..."
-            if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C mysqldump -h'$REMOTE_DB_HOST' -u'$REMOTE_DB_USER' -p'$REMOTE_DB_PASS' '$REMOTE_DB_NAME' > '$remote_backup_dir/db.sql'" >/dev/null 2>&1; then
+            if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C mysqldump -h'$REMOTE_DB_HOST' -u'$REMOTE_DB_USER' -p'$REMOTE_DB_PASS' '$REMOTE_DB_NAME' > '\$HOME/backup_temp/$backup_name/db.sql' 2>/dev/null"; then
                 success "Database exported via mysqldump"
             else
                 error "Database export failed"
@@ -855,7 +842,7 @@ create_and_transfer_backup() {
     }
     
     # Compress database dump
-    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C gzip '$remote_backup_dir/db.sql'" >/dev/null 2>&1 || {
+    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C gzip '\$HOME/backup_temp/$backup_name/db.sql'" 2>/dev/null || {
         warning "Failed to compress database dump"
     }
     
@@ -863,12 +850,12 @@ create_and_transfer_backup() {
     info "Copying wp-content directory..."
     if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C [ -d '$wp_dir/wp-content' ]" >/dev/null 2>&1; then
         # Show size first
-        local wp_content_size=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "du -sh '$wp_dir/wp-content/' 2>/dev/null | cut -f1" 2>/dev/null || echo "unknown")
+        local wp_content_size=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C du -sh '$wp_dir/wp-content/' 2>/dev/null | cut -f1" 2>/dev/null || echo "unknown")
         info "wp-content size: $wp_content_size - copying..."
         
         # Use a more reliable copy method with explicit success checking
         if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "
-            LC_ALL=C cp -r '$wp_dir/wp-content' '$remote_backup_dir/' && 
+            LC_ALL=C cp -r '$wp_dir/wp-content' '\$HOME/backup_temp/$backup_name/' && 
             echo 'COPY_SUCCESS'
         " | grep -q "COPY_SUCCESS"; then
             success "wp-content copied successfully"
@@ -880,32 +867,19 @@ create_and_transfer_backup() {
         warning "wp-content directory not found - continuing without it"
     fi
     
-    # Step 4: Create archive (same format as other imports)
+    # Step 4: Create archive
     info "Creating backup archive..."
-    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '/tmp' && tar -czf '${backup_name}.tar.gz' '$backup_name'" || {
+    if ! sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '\$HOME/backup_temp' && LC_ALL=C tar -czf '${backup_name}.tar.gz' '$backup_name'"; then
         error "Failed to create backup archive"
         return 1
-    }
+    fi
     
     # Step 5: Transfer archive
     info "Transferring backup archive..."
     
     # Show progress for large transfers
     {
-        sshpass -p "$SSH_PASS" scp -P "$SSH_PORT" "$SSH_USER@$SSH_HOST:/tmp/${backup_name}.tar.gz" "$local_backup_file" &
-        local scp_pid=$!
-        
-        # Show activity indicator while transfer is running
-        while kill -0 $scp_pid 2>/dev/null; do
-            echo -n "." >&2
-            sleep 5
-        done
-        echo >&2
-        
-        wait $scp_pid
-        local scp_status=$?
-        
-        if [ $scp_status -eq 0 ]; then
+        if sshpass -p "$SSH_PASS" scp -P "$SSH_PORT" "$SSH_USER@$SSH_HOST:\$HOME/backup_temp/${backup_name}.tar.gz" "$local_backup_file"; then
             success "Backup transferred successfully"
         else
             error "Failed to transfer backup"
@@ -915,7 +889,7 @@ create_and_transfer_backup() {
     
     # Step 6: Cleanup remote files
     info "Cleaning up remote files..."
-    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "rm -rf '$remote_backup_dir' '/tmp/${backup_name}.tar.gz'" || {
+    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C rm -rf '\$HOME/backup_temp/$backup_name' '\$HOME/backup_temp/${backup_name}.tar.gz'" || {
         warning "Failed to cleanup remote files"
     }
     
@@ -1093,7 +1067,7 @@ ensure_sshpass() {
 import_from_archive() {
     local archive_file=$1
     local wp_root=$(load_state "WP_ROOT")
-    local temp_dir="$WP_MGMT_DIR/tmp/wp-import-$$"  # Changed from /tmp
+    local temp_dir="$WP_MGMT_DIR/tmp/wp-import-$$"  # Use main filesystem, not /tmp
     
     if [ ! -f "$archive_file" ]; then
         error "Archive file not found: $archive_file"
@@ -1111,8 +1085,15 @@ import_from_archive() {
         return 1
     fi
     
-    info "Extracting archive to main filesystem..."
+    info "Extracting $(du -h "$archive_file" | cut -f1) archive to main filesystem..."
     mkdir -p "$temp_dir"
+    
+    # Rest of the function continues as before...
+    if ! tar -xzf "$archive_file" -C "$temp_dir"; then
+        error "Failed to extract archive"
+        rm -rf "$temp_dir"
+        return 1
+    fi
     
     # Extract main archive
     if ! tar -xzf "$archive_file" -C "$temp_dir"; then
