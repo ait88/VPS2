@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/backup.sh - Backup system configuration
-# Version: 3.0.6
+# Version: 3.0.7
 
 setup_backup_system() {
     info "Setting up backup system..."
