@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/backup.sh - Backup system configuration
-# Version: 3.0.1
+# Version: 3.0.2
 
 setup_backup_system() {
     info "Setting up backup system..."
@@ -65,7 +65,7 @@ install_backup_scripts() {
     
     info "Installing backup scripts..."
     
-    # Main backup script
+    # Main backup script with proper variable expansion
     sudo tee "/home/$backup_user/backup-wordpress.sh" >/dev/null <<EOF
 #!/bin/bash
 # WordPress Backup Script
@@ -116,21 +116,37 @@ trap 'rm -rf "\$TEMP_DIR"' EXIT
 # Backup database
 log "Backing up database..."
 /home/\$BACKUP_USER/backup-database.sh > "\$TEMP_DIR/db.sql"
-gzip "\$TEMP_DIR/db.sql"
+if [ \$? -eq 0 ]; then
+    gzip "\$TEMP_DIR/db.sql"
+    log "Database backup completed"
+else
+    log "Database backup failed"
+    exit 1
+fi
 
 # Copy wp-config.php
 log "Copying configuration..."
-cp "\$WP_ROOT/wp-config.php" "\$TEMP_DIR/"
+if [ -f "\$WP_ROOT/wp-config.php" ]; then
+    cp "\$WP_ROOT/wp-config.php" "\$TEMP_DIR/"
+else
+    log "wp-config.php not found"
+    exit 1
+fi
 
 # Backup wp-content (excluding cache)
 log "Backing up wp-content..."
-rsync -a \\
-    --exclude='cache/' \\
-    --exclude='*.log' \\
-    --exclude='backup-*' \\
-    --exclude='upgrade/' \\
-    --exclude='uploads/backup-*' \\
-    "\$WP_ROOT/wp-content/" "\$TEMP_DIR/wp-content/"
+if [ -d "\$WP_ROOT/wp-content" ]; then
+    rsync -a \\
+        --exclude='cache/' \\
+        --exclude='*.log' \\
+        --exclude='backup-*' \\
+        --exclude='upgrade/' \\
+        --exclude='uploads/backup-*' \\
+        "\$WP_ROOT/wp-content/" "\$TEMP_DIR/wp-content/"
+else
+    log "wp-content directory not found"
+    exit 1
+fi
 
 # Create archive
 log "Creating archive..."
@@ -161,7 +177,7 @@ echo "BACKUP_TYPE=\$BACKUP_TYPE"
 exit 0
 EOF
     
-    # Quick backup script (database only)
+    # Quick backup script with proper variable expansion
     sudo tee "/home/$backup_user/quick-backup.sh" >/dev/null <<EOF
 #!/bin/bash
 # Quick database backup
@@ -256,7 +272,6 @@ EOF
     sudo chown "$backup_user:$backup_user" /home/$backup_user/*.sh
     sudo chmod 750 /home/$backup_user/*.sh
 }
-
 setup_backup_credentials() {
     local backup_user=$(load_state "BACKUP_USER")
     local admin_email=$(load_state "ADMIN_EMAIL")
