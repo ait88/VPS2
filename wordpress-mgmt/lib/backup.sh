@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/backup.sh - Backup system configuration
-# Version: 3.0.3
+# Version: 3.0.4
 
 setup_backup_system() {
     info "Setting up backup system..."
@@ -171,31 +171,21 @@ else
     exit 1
 fi
 
-# Copy configuration (with sudo for access)
+# Copy configuration (using wrapper)
 log "Copying configuration..."
-if sudo cp "$WP_ROOT/wp-config.php" "$TEMP_DIR/" 2>/dev/null; then
+if sudo /usr/local/bin/backup-wp-files copy-config "" "$TEMP_DIR"; then
     log "Configuration copied"
 else
     log "Failed to copy wp-config.php"
     exit 1
 fi
 
-# Backup wp-content (with sudo for access)
+# Backup wp-content (using wrapper)  
 log "Backing up wp-content..."
-if [ -d "$WP_ROOT/wp-content" ]; then
-    sudo rsync -a \
-        --exclude='cache/' \
-        --exclude='*.log' \
-        --exclude='backup-*' \
-        --exclude='upgrade/' \
-        --exclude='uploads/backup-*' \
-        "$WP_ROOT/wp-content/" "$TEMP_DIR/wp-content/"
-    
-    # Fix ownership of copied files
-    sudo chown -R "$BACKUP_USER:$BACKUP_USER" "$TEMP_DIR/wp-content/"
+if sudo /usr/local/bin/backup-wp-files copy-content "" "$TEMP_DIR"; then
     log "wp-content backup completed"
 else
-    log "wp-content directory not found"
+    log "wp-content backup failed"
     exit 1
 fi
 
