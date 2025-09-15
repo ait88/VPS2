@@ -492,6 +492,7 @@ import_from_directory() {
     echo
     echo "You can provide either:"
     echo "• Path to backup archive (.tar.gz file)"
+    echo "• Path to directory containing backup archives"
     echo "• Path to extracted backup directory"
     echo
     read -p "Enter path to backup archive or directory: " backup_path
@@ -511,9 +512,9 @@ import_from_directory() {
             return 1
         fi
     elif [ -d "$backup_path" ]; then
-        # It's a directory - validate backup structure
-        info "Using directory: $backup_path"
-        import_from_extracted_directory "$backup_path"
+        # It's a directory - check what's inside
+        info "Scanning directory: $backup_path"
+        handle_directory_import "$backup_path"
     else
         error "Path not found: $backup_path"
         echo
@@ -524,8 +525,63 @@ import_from_directory() {
         echo
         echo "Example paths:"
         echo "• ~/wordpress-mgmt/tmp/backup.tar.gz"
+        echo "• ~/wordpress-mgmt/tmp/"
         echo "• ~/wordpress-mgmt/tmp/wp-import-139285/wordpress_ssh_backup_20250915_085057"
         return 1
+    fi
+}
+
+handle_directory_import() {
+    local dir_path=$1
+    
+    # Look for .tar.gz archives in the directory
+    local archives=($(find "$dir_path" -maxdepth 1 -name "*.tar.gz" -type f | sort -r))
+    
+    if [ ${#archives[@]} -gt 0 ]; then
+        # Found archives - let user select
+        echo
+        echo "Found ${#archives[@]} backup archive(s) in directory:"
+        echo "────────────────────────────────────────────────"
+        
+        local i=1
+        for archive in "${archives[@]}"; do
+            local file_name=$(basename "$archive")
+            local file_size=$(du -h "$archive" | cut -f1)
+            local file_date=$(stat -c %y "$archive" | cut -d' ' -f1)
+            echo "$i) $file_name ($file_size, $file_date)"
+            ((i++))
+        done
+        
+        echo
+        read -p "Select archive to import [1-${#archives[@]}]: " choice
+        
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#archives[@]} ]; then
+            local selected_archive="${archives[$((choice-1))]}"
+            info "Selected: $(basename "$selected_archive")"
+            import_from_archive "$selected_archive"
+        else
+            error "Invalid selection"
+            return 1
+        fi
+    else
+        # No archives found - check if it's an extracted backup directory
+        info "No .tar.gz archives found in directory"
+        info "Checking if directory contains extracted backup..."
+        
+        if validate_backup_structure "$dir_path"; then
+            info "Found extracted backup structure"
+            import_from_extracted_directory "$dir_path"
+        else
+            error "Directory contains neither backup archives nor extracted backup structure"
+            echo
+            echo "Directory contents:"
+            ls -la "$dir_path" | head -10
+            echo
+            echo "Expected either:"
+            echo "• .tar.gz backup archives"
+            echo "• Extracted backup with wp-config.php, db.sql*, and wp-content/"
+            return 1
+        fi
     fi
 }
 
@@ -1302,8 +1358,9 @@ define( 'FORCE_SSL_ADMIN', true );\\
 validate_backup_structure() {
     local extract_dir=$1
     local errors=()
+    local warnings=()
     
-    info "Validating backup structure..."
+    info "Validating backup structure in: $(basename "$extract_dir")"
     
     # Check for required files
     if [ ! -f "$extract_dir/wp-config.php" ]; then
@@ -1311,11 +1368,12 @@ validate_backup_structure() {
     fi
     
     # Check for database dump using pattern matching
-    local db_file=""
-    db_file=$(find "$extract_dir" -maxdepth 1 -name "*.sql*" -type f | head -1)
+    local db_files=($(find "$extract_dir" -maxdepth 1 -name "*.sql*" -type f))
     
-    if [ -z "$db_file" ]; then
+    if [ ${#db_files[@]} -eq 0 ]; then
         errors+=("Database dump not found (expected *.sql or *.sql.gz)")
+    elif [ ${#db_files[@]} -gt 1 ]; then
+        warnings+=("Multiple database files found: ${db_files[*]}")
     fi
     
     # Check for wp-content (directory or archive)
@@ -1328,15 +1386,26 @@ validate_backup_structure() {
         errors+=("wp-content not found (expected directory or wp-content.tar.gz)")
     fi
     
+    # Show warnings
+    if [ ${#warnings[@]} -gt 0 ]; then
+        for warn in "${warnings[@]}"; do
+            warning "$warn"
+        done
+    fi
+    
+    # Check for errors
     if [ ${#errors[@]} -gt 0 ]; then
         error "Backup validation failed:"
         for err in "${errors[@]}"; do
             error "  - $err"
         done
+        echo
+        echo "Directory contents:"
+        ls -la "$extract_dir" | head -10
         return 1
     fi
     
-    info "✓ Backup structure valid (wp-content: $wp_content_source, database: $(basename "$db_file"))"
+    success "✓ Backup structure valid (wp-content: $wp_content_source, database: $(basename "${db_files[0]}"))"
     return 0
 }
 
