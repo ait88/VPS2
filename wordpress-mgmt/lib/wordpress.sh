@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.2
+# Version: 3.0.3
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -801,7 +801,7 @@ create_and_transfer_backup() {
     local wp_dir=$1
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local backup_name="wordpress_ssh_backup_$timestamp"
-    local remote_backup_dir="/tmp/$backup_name"
+    local remote_backup_dir="~/backup_temp/$backup_name"
     local local_backup_file="$WP_MGMT_DIR/tmp/${backup_name}.tar.gz"
     
     # Create local tmp directory
@@ -809,8 +809,8 @@ create_and_transfer_backup() {
     
     info "Creating remote backup..."
     
-    # Create backup directory on remote server
-    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mkdir -p '$remote_backup_dir'" || {
+    # Ensure remote backup directory exists
+    sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mkdir -p ~/backup_temp" || {
         error "Failed to create remote backup directory"
         return 1
     }
@@ -1093,14 +1093,25 @@ ensure_sshpass() {
 import_from_archive() {
     local archive_file=$1
     local wp_root=$(load_state "WP_ROOT")
-    local temp_dir="/tmp/wp-import-$$"
+    local temp_dir="$WP_MGMT_DIR/tmp/wp-import-$$"  # Changed from /tmp
     
     if [ ! -f "$archive_file" ]; then
         error "Archive file not found: $archive_file"
         return 1
     fi
     
-    info "Extracting archive..."
+    # Check disk space before extraction
+    local archive_size=$(stat -c%s "$archive_file")
+    local available_space=$(df "$WP_MGMT_DIR" | awk 'NR==2 {print $4*1024}')
+    
+    if [ "$archive_size" -gt "$((available_space - 1073741824))" ]; then
+        error "Insufficient disk space for extraction"
+        error "Archive size: $(du -h "$archive_file" | cut -f1)"
+        error "Available space: $(df -h "$WP_MGMT_DIR" | awk 'NR==2 {print $4}')"
+        return 1
+    fi
+    
+    info "Extracting archive to main filesystem..."
     mkdir -p "$temp_dir"
     
     # Extract main archive
