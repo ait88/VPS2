@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/utils.sh - Common utility functions
-# Version: 3.0.0
+# Version: 3.0.1
 
 # ===== SYSTEM CHECKS =====
 check_sudo() {
@@ -237,6 +237,28 @@ enforce_standard_permissions() {
     done
     
     success "✓ Standardized permissions applied"
+}
+
+# Get the actual user's home directory (handles sudo correctly)
+get_user_home() {
+    # If running under sudo, get the original user's home
+    if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+        getent passwd "$SUDO_USER" | cut -d: -f6
+    else
+        echo "$HOME"
+    fi
+}
+
+# Expand path with proper user home directory
+expand_user_path() {
+    local path="$1"
+    local user_home=$(get_user_home)
+    
+    # Replace ~ or $HOME with actual user home
+    path="${path/#\~/$user_home}"
+    path="${path/#\$HOME/$user_home}"
+    
+    echo "$path"
 }
 
 debug "Utils module loaded successfully"
