@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/users.sh - User management with security isolation
-# Version: 3.0.1
+# Version: 3.0.2
 
 setup_users() {
     info "Setting up users with security isolation..."
@@ -152,12 +152,61 @@ setup_backup_user() {
     # Add backup user to wordpress group for read access
     sudo usermod -a -G wordpress "$backup_user"
     
-    # Configure sudo access for backup operations
+    # Create a backup wrapper script for secure operations
+    sudo tee "/usr/local/bin/backup-wp-files" >/dev/null <<'EOF'
+#!/bin/bash
+# WordPress backup file operations wrapper
+# Usage: backup-wp-files <operation> <source> <dest>
+
+set -euo pipefail
+
+OPERATION="$1"
+WP_ROOT="/var/www/wordpress"
+BACKUP_USER="wp-backup"
+
+# Validate caller is backup user
+if [ "$(whoami)" != "root" ] || [ "${SUDO_USER:-}" != "$BACKUP_USER" ]; then
+    echo "Error: This script must be called via sudo by backup user only" >&2
+    exit 1
+fi
+
+# Validate destination is in /tmp
+case "$3" in
+    /tmp/*)
+        ;;
+    *)
+        echo "Error: Destination must be in /tmp" >&2
+        exit 1
+        ;;
+esac
+
+case "$OPERATION" in
+    "copy-config")
+        cp "$WP_ROOT/wp-config.php" "$3/"
+        ;;
+    "copy-content")
+        rsync -a \
+            --exclude='cache/' \
+            --exclude='*.log' \
+            --exclude='backup-*' \
+            --exclude='upgrade/' \
+            --exclude='uploads/backup-*' \
+            "$WP_ROOT/wp-content/" "$3/wp-content/"
+        chown -R "$BACKUP_USER:$BACKUP_USER" "$3/wp-content/"
+        ;;
+    *)
+        echo "Error: Invalid operation: $OPERATION" >&2
+        exit 1
+        ;;
+esac
+EOF
+
+    sudo chmod 755 "/usr/local/bin/backup-wp-files"
+    
+    # Simple sudoers rule for the wrapper script
     sudo tee "/etc/sudoers.d/backup-wordpress" >/dev/null <<EOF
-# Allow backup user to read WordPress files
-$backup_user ALL=(root) NOPASSWD: /bin/cp /var/www/wordpress/wp-config.php *
-$backup_user ALL=(root) NOPASSWD: /usr/bin/rsync * /var/www/wordpress/wp-content/* *
-$backup_user ALL=(root) NOPASSWD: /bin/chown -R $backup_user:$backup_user *
+# WordPress Backup User - Secure backup operations via wrapper
+$backup_user ALL=(root) NOPASSWD: /usr/local/bin/backup-wp-files *
 EOF
     
     # Configure restricted shell for backup user
