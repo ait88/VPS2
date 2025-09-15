@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.1
+# Version: 3.0.2
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -862,10 +862,20 @@ create_and_transfer_backup() {
     # Step 3: Copy wp-content
     info "Copying wp-content directory..."
     if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C [ -d '$wp_dir/wp-content' ]" >/dev/null 2>&1; then
-        sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "LC_ALL=C cp -r '$wp_dir/wp-content' '$remote_backup_dir/'" >/dev/null 2>&1 || {
+        # Show size first
+        local wp_content_size=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "du -sh '$wp_dir/wp-content/' 2>/dev/null | cut -f1" 2>/dev/null || echo "unknown")
+        info "wp-content size: $wp_content_size - copying..."
+        
+        # Use a more reliable copy method with explicit success checking
+        if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "
+            LC_ALL=C cp -r '$wp_dir/wp-content' '$remote_backup_dir/' && 
+            echo 'COPY_SUCCESS'
+        " | grep -q "COPY_SUCCESS"; then
+            success "wp-content copied successfully"
+        else
             error "Failed to copy wp-content"
             return 1
-        }
+        fi
     else
         warning "wp-content directory not found - continuing without it"
     fi
