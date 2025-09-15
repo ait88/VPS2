@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/backup.sh - Backup system configuration
-# Version: 3.0.4
+# Version: 3.0.5
 
 setup_backup_system() {
     info "Setting up backup system..."
@@ -106,7 +106,7 @@ BACKUP_USER="$backup_user"
 BACKUP_DIR="/home/$backup_user/db-backups"
 EOF
 
-    # Main backup script with proper variable handling
+    # Main backup script with wrapper script usage
     sudo tee "/home/$backup_user/backup-wordpress.sh" >/dev/null <<'EOF'
 #!/bin/bash
 # WordPress Backup Script
