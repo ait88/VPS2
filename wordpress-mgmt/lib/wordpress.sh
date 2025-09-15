@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.7
+# Version: 3.0.8
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -497,8 +497,15 @@ import_from_directory() {
     echo
     read -p "Enter path to backup archive or directory: " backup_path
     
-    # Expand tilde to home directory
-    backup_path="${backup_path/#\~/$HOME}"
+    # Expand path with proper user home directory (handles sudo correctly)
+    backup_path=$(expand_user_path "$backup_path")
+    
+    # Debug info for troubleshooting
+    debug "Original input: $backup_path"
+    debug "Resolved path: $backup_path"
+    debug "Current user: $(whoami)"
+    debug "Sudo user: ${SUDO_USER:-none}"
+    debug "User home: $(get_user_home)"
     
     # Check what the user provided
     if [ -f "$backup_path" ]; then
