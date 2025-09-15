@@ -479,31 +479,33 @@ EOF
     sudo chmod 600 "$backup_creds"
     debug "Backup credentials file created"
     
-    # Create backup script
+    # Create backup script with proper variable expansion
     debug "Creating backup script..."
     local backup_script="/home/$backup_user/backup-database.sh"
-    sudo tee "$backup_script" >/dev/null <<'EOF'
+    
+    # Use double quotes to allow variable expansion
+    sudo tee "$backup_script" >/dev/null <<EOF
 #!/bin/bash
 # Database backup script
 
-DB_NAME="'$db_name'"
-BACKUP_DIR="'$backup_dir'"
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="$BACKUP_DIR/db_${DB_NAME}_${DATE}.sql.gz"
+DB_NAME="$db_name"
+BACKUP_DIR="$backup_dir"
+DATE=\$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="\$BACKUP_DIR/db_\${DB_NAME}_\${DATE}.sql.gz"
 
 # Create backup
-mysqldump --defaults-file=$HOME/.my.cnf \
-    --single-transaction \
-    --routines \
-    --triggers \
-    --events \
-    "$DB_NAME" | gzip > "$BACKUP_FILE"
+mysqldump --defaults-file=\$HOME/.my.cnf \\
+    --single-transaction \\
+    --routines \\
+    --triggers \\
+    --events \\
+    "\$DB_NAME" | gzip > "\$BACKUP_FILE"
 
 # Keep only last 7 days of backups
-find "$BACKUP_DIR" -name "db_${DB_NAME}_*.sql.gz" -mtime +7 -delete
+find "\$BACKUP_DIR" -name "db_\${DB_NAME}_*.sql.gz" -mtime +7 -delete
 
 # Output backup file path for remote backup system
-echo "$BACKUP_FILE"
+echo "\$BACKUP_FILE"
 EOF
     
     sudo chown "$backup_user:$backup_user" "$backup_script"
