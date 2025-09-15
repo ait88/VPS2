@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/backup.sh - Backup system configuration
-# Version: 3.0.5
+# Version: 3.0.6
 
 setup_backup_system() {
     info "Setting up backup system..."
@@ -173,7 +173,7 @@ fi
 
 # Copy configuration (using wrapper)
 log "Copying configuration..."
-if sudo /usr/local/bin/backup-wp-files copy-config "" "$TEMP_DIR"; then
+if env -u SUDO_USER sudo /usr/local/bin/backup-wp-files copy-config "" "$TEMP_DIR"; then
     log "Configuration copied"
 else
     log "Failed to copy wp-config.php"
@@ -182,7 +182,7 @@ fi
 
 # Backup wp-content (using wrapper)  
 log "Backing up wp-content..."
-if sudo /usr/local/bin/backup-wp-files copy-content "" "$TEMP_DIR"; then
+if env -u SUDO_USER sudo /usr/local/bin/backup-wp-files copy-content "" "$TEMP_DIR"; then
     log "wp-content backup completed"
 else
     log "wp-content backup failed"
