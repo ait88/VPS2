@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.10
+# Version: 3.0.11
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -840,7 +840,6 @@ discover_and_select_wordpress() {
 }
 
 # Discover and select additional folders from remote server
-# Discover and select additional folders from remote server
 discover_additional_folders() {
     local wp_dir=$1
     
@@ -849,9 +848,6 @@ discover_additional_folders() {
     # Use a single-line command for better SSH compatibility
     local folders
     folders=$(sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' 2>/dev/null && find . -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | grep -v -E '^(\\.|wp-content|wp-admin|wp-includes|cgi-bin|\\.well-known)$' | sort" 2>/dev/null)
-    
-    # Debug output
-    debug "Raw folder output: $folders" >&2
     
     if [ -z "$folders" ]; then
         debug "No additional folders found" >&2
@@ -863,9 +859,16 @@ discover_additional_folders() {
     local folder_count=$(echo "$folders" | wc -l)
     info "Found $folder_count potential additional folder(s)" >&2
     
-    # Ask if user wants to include additional folders
+    # Ask if user wants to include additional folders - FIXED SECTION
     echo >&2
-    if ! confirm "Include additional (non-standard) folders in backup?" N; then
+    echo -ne "\033[1;33mInclude additional (non-standard) folders in backup? [y/N]: \033[0m" >&2
+    read -r include_response
+    
+    # Default to N if empty
+    include_response=${include_response:-N}
+    
+    if [[ ! "$include_response" =~ ^[Yy]$ ]]; then
+        info "Skipping additional folders" >&2
         echo ""
         return 0
     fi
@@ -928,6 +931,7 @@ discover_additional_folders() {
         echo ""
     fi
 }
+
 # Extract database credentials from remote wp-config.php
 extract_remote_db_creds() {
     local wp_dir=$1
