@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/utils.sh - Common utility functions
-# Version: 3.0.1
+# Version: 3.0.3
 
 # ===== SYSTEM CHECKS =====
 check_sudo() {
@@ -259,6 +259,124 @@ expand_user_path() {
     path="${path/#\$HOME/$user_home}"
     
     echo "$path"
+}
+
+# Verification to ensure WordPress is running
+verify_wordpress_stack() {
+    info "=== Final System Verification ==="
+    
+    local domain=$(load_state "DOMAIN")
+    local wp_root=$(load_state "WP_ROOT")
+    local wp_user=$(load_state "WP_USER")
+    local php_version=$(load_state "PHP_VERSION")
+    local all_good=true
+    local issues=()
+    
+    # Check 1: PHP-FPM service running
+    echo -n "Checking PHP-FPM service... "
+    if sudo systemctl is-active --quiet "php${php_version}-fpm"; then
+        echo -e "\033[0;32m✓\033[0m"
+    else
+        echo -e "\033[0;31m✗\033[0m"
+        issues+=("PHP-FPM service not running")
+        all_good=false
+    fi
+    
+    # Check 2: PHP-FPM socket exists and has correct permissions
+    echo -n "Checking PHP-FPM socket... "
+    local php_socket=$(load_state "PHP_FPM_SOCKET")
+    if [ -S "$php_socket" ]; then
+        local socket_perms=$(stat -c "%U:%G %a" "$php_socket")
+        if [[ "$socket_perms" =~ www-data:www-data.*660 ]]; then
+            echo -e "\033[0;32m✓\033[0m"
+        else
+            echo -e "\033[1;33m⚠\033[0m (permissions: $socket_perms)"
+            issues+=("PHP-FPM socket permissions suboptimal")
+        fi
+    else
+        echo -e "\033[0;31m✗\033[0m"
+        issues+=("PHP-FPM socket missing: $php_socket")
+        all_good=false
+    fi
+    
+    # Check 3: Nginx service running
+    echo -n "Checking Nginx service... "
+    if sudo systemctl is-active --quiet nginx; then
+        echo -e "\033[0;32m✓\033[0m"
+    else
+        echo -e "\033[0;31m✗\033[0m"
+        issues+=("Nginx service not running")
+        all_good=false
+    fi
+    
+    # Check 4: Database connection
+    echo -n "Checking database connection... "
+    if sudo -u "$wp_user" wp --path="$wp_root" db check >/dev/null 2>&1; then
+        echo -e "\033[0;32m✓\033[0m"
+    else
+        echo -e "\033[0;31m✗\033[0m"
+        issues+=("Database connection failed")
+        all_good=false
+    fi
+    
+    # Check 5: WordPress core files
+    echo -n "Checking WordPress core files... "
+    if [ -f "$wp_root/wp-config.php" ] && [ -f "$wp_root/wp-login.php" ]; then
+        local wp_config_perms=$(stat -c "%U:%G %a" "$wp_root/wp-config.php")
+        if [[ "$wp_config_perms" =~ $wp_user:wordpress.*640 ]]; then
+            echo -e "\033[0;32m✓\033[0m"
+        else
+            echo -e "\033[1;33m⚠\033[0m (wp-config.php permissions: $wp_config_perms)"
+            issues+=("wp-config.php permissions need attention")
+        fi
+    else
+        echo -e "\033[0;31m✗\033[0m"
+        issues+=("WordPress core files missing")
+        all_good=false
+    fi
+    
+    # Check 6: HTTP Response (if domain resolves)
+    echo -n "Checking HTTP response... "
+    if curl -sS -o /dev/null -w "%{http_code}" --max-time 10 "https://$domain" 2>/dev/null | grep -q "200"; then
+        echo -e "\033[0;32m✓\033[0m"
+    elif curl -sS -o /dev/null -w "%{http_code}" --max-time 5 --insecure "https://$domain" 2>/dev/null | grep -q "200"; then
+        echo -e "\033[1;33m⚠\033[0m (SSL certificate issue)"
+        issues+=("SSL certificate needs attention")
+    else
+        # Check if it's a DNS/network issue vs server issue
+        if curl -sS -o /dev/null --max-time 5 "http://localhost" >/dev/null 2>&1; then
+            echo -e "\033[1;33m⚠\033[0m (domain not resolving locally)"
+            issues+=("Domain DNS not configured for local testing")
+        else
+            echo -e "\033[0;31m✗\033[0m"
+            issues+=("HTTP request failed - check nginx configuration")
+            all_good=false
+        fi
+    fi
+    
+    echo
+    
+    # Show results
+    if $all_good && [ ${#issues[@]} -eq 0 ]; then
+        success "✓ All systems operational"
+        return 0
+    elif $all_good; then
+        warning "⚠ System working with minor issues:"
+        for issue in "${issues[@]}"; do
+            echo "    • $issue"
+        done
+        echo
+        warning "WordPress should work, but consider addressing these issues"
+        return 0
+    else
+        error "✗ Critical issues found:"
+        for issue in "${issues[@]}"; do
+            echo "    • $issue"
+        done
+        echo
+        error "WordPress may not function properly. Address these issues first."
+        return 1
+    fi
 }
 
 debug "Utils module loaded successfully"
