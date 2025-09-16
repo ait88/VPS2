@@ -840,26 +840,28 @@ discover_and_select_wordpress() {
 }
 
 # Discover and select additional folders from remote server
+# Discover and select additional folders from remote server
 discover_additional_folders() {
     local wp_dir=$1
     
     info "Checking for additional folders to copy..." >&2
     
-    # Get list of folders in the WordPress directory (exclude standard WP folders)
+    # Use a single-line command for better SSH compatibility
     local folders
-    folders=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "
-        cd '$wp_dir' && 
-        find . -maxdepth 1 -type d ! -name '.' ! -name '..' \
-            ! -name 'wp-content' ! -name 'wp-admin' ! -name 'wp-includes' \
-            ! -name 'cgi-bin' ! -name '.well-known' \
-            -printf '%f\n' | sort
-    " 2>/dev/null)
+    folders=$(sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd '$wp_dir' 2>/dev/null && find . -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | grep -v -E '^(\\.|wp-content|wp-admin|wp-includes|cgi-bin|\\.well-known)$' | sort" 2>/dev/null)
+    
+    # Debug output
+    debug "Raw folder output: $folders" >&2
     
     if [ -z "$folders" ]; then
         debug "No additional folders found" >&2
         echo ""
         return 0
     fi
+    
+    # Count folders
+    local folder_count=$(echo "$folders" | wc -l)
+    info "Found $folder_count potential additional folder(s)" >&2
     
     # Ask if user wants to include additional folders
     echo >&2
@@ -871,10 +873,17 @@ discover_additional_folders() {
     echo >&2
     echo "Available additional folders:" >&2
     echo "────────────────────────────" >&2
-    echo "$folders" | nl -w2 -s') ' >&2
+    
+    # Display folders with numbers
+    local i=1
+    while IFS= read -r folder; do
+        [ -n "$folder" ] && echo "$i) $folder" >&2
+        ((i++))
+    done <<< "$folders"
+    
     echo >&2
     echo "Enter folder names to include (one per line, empty to finish):" >&2
-    echo "Example: assets" >&2
+    echo "Example: cache" >&2
     echo >&2
     
     local selected_folders=()
@@ -886,18 +895,27 @@ discover_additional_folders() {
         # Break on empty input
         [ -z "$folder_input" ] && break
         
+        # Remove any leading/trailing whitespace
+        folder_input=$(echo "$folder_input" | xargs)
+        
         # Validate folder exists in list
         if echo "$folders" | grep -q "^${folder_input}$"; then
-            # Verify folder actually exists on remote
-            if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "[ -d '$wp_dir/$folder_input' ]" 2>/dev/null; then
-                selected_folders+=("$folder_input")
-                success "Added: $folder_input" >&2
+            # Double-check folder exists on remote (with timeout)
+            if timeout 5 sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "test -d '$wp_dir/$folder_input'" 2>/dev/null; then
+                # Check if already selected
+                if [[ " ${selected_folders[*]} " =~ " ${folder_input} " ]]; then
+                    warning "Already selected: $folder_input" >&2
+                else
+                    selected_folders+=("$folder_input")
+                    success "Added: $folder_input" >&2
+                fi
             else
                 warning "Folder not accessible: $folder_input" >&2
             fi
         else
             warning "Invalid folder: $folder_input" >&2
-            echo "Available: $(echo "$folders" | tr '\n' ', ' | sed 's/, $//')" >&2
+            echo "Available folders: $folders" | tr '\n' ' ' >&2
+            echo >&2
         fi
     done
     
@@ -906,10 +924,10 @@ discover_additional_folders() {
         # Return space-separated list
         echo "${selected_folders[*]}"
     else
+        info "No additional folders selected" >&2
         echo ""
     fi
 }
-
 # Extract database credentials from remote wp-config.php
 extract_remote_db_creds() {
     local wp_dir=$1
