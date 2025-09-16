@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.8
+# Version: 3.0.9
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -612,7 +612,10 @@ import_from_extracted_directory() {
     
     # Ensure WordPress core files are present
     ensure_wordpress_core
-    
+
+    # Process additional folders
+    process_additional_folders_import "$extract_dir" "$wp_root"
+        
     # Configure WordPress for import
     configure_wordpress_import "$extract_dir"
     
@@ -648,6 +651,13 @@ import_from_ssh() {
     # Discover and select WordPress site
     local selected_wp_dir
     selected_wp_dir=$(discover_and_select_wordpress) || return 1
+
+    # Discover additional folders to include
+    local additional_folders
+    additional_folders=$(discover_additional_folders "$selected_wp_dir") || true
+    
+    # Store for backup creation
+    REMOTE_ADDITIONAL_FOLDERS="$additional_folders"
     
     # Extract database credentials
     local db_creds
@@ -829,6 +839,77 @@ discover_and_select_wordpress() {
     echo "$wp_dir"
 }
 
+# Discover and select additional folders from remote server
+discover_additional_folders() {
+    local wp_dir=$1
+    
+    info "Checking for additional folders to copy..." >&2
+    
+    # Get list of folders in the WordPress directory (exclude standard WP folders)
+    local folders
+    folders=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "
+        cd '$wp_dir' && 
+        find . -maxdepth 1 -type d ! -name '.' ! -name '..' \
+            ! -name 'wp-content' ! -name 'wp-admin' ! -name 'wp-includes' \
+            ! -name 'cgi-bin' ! -name '.well-known' \
+            -printf '%f\n' | sort
+    " 2>/dev/null)
+    
+    if [ -z "$folders" ]; then
+        debug "No additional folders found" >&2
+        echo ""
+        return 0
+    fi
+    
+    # Ask if user wants to include additional folders
+    echo >&2
+    if ! confirm "Include additional (non-standard) folders in backup?" N; then
+        echo ""
+        return 0
+    fi
+    
+    echo >&2
+    echo "Available additional folders:" >&2
+    echo "────────────────────────────" >&2
+    echo "$folders" | nl -w2 -s') ' >&2
+    echo >&2
+    echo "Enter folder names to include (one per line, empty to finish):" >&2
+    echo "Example: assets" >&2
+    echo >&2
+    
+    local selected_folders=()
+    while true; do
+        local folder_input
+        echo -n "> " >&2
+        read -r folder_input
+        
+        # Break on empty input
+        [ -z "$folder_input" ] && break
+        
+        # Validate folder exists in list
+        if echo "$folders" | grep -q "^${folder_input}$"; then
+            # Verify folder actually exists on remote
+            if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "[ -d '$wp_dir/$folder_input' ]" 2>/dev/null; then
+                selected_folders+=("$folder_input")
+                success "Added: $folder_input" >&2
+            else
+                warning "Folder not accessible: $folder_input" >&2
+            fi
+        else
+            warning "Invalid folder: $folder_input" >&2
+            echo "Available: $(echo "$folders" | tr '\n' ', ' | sed 's/, $//')" >&2
+        fi
+    done
+    
+    if [ ${#selected_folders[@]} -gt 0 ]; then
+        info "Selected additional folders: ${selected_folders[*]}" >&2
+        # Return space-separated list
+        echo "${selected_folders[*]}"
+    else
+        echo ""
+    fi
+}
+
 # Extract database credentials from remote wp-config.php
 extract_remote_db_creds() {
     local wp_dir=$1
@@ -989,6 +1070,27 @@ create_and_transfer_backup() {
         fi
     else
         warning "wp-content directory not found - continuing without it"
+    fi
+
+    # Step 3b: Copy additional folders if specified
+    if [ -n "${REMOTE_ADDITIONAL_FOLDERS:-}" ]; then
+        info "Copying additional folders..."
+        
+        # Create container for additional folders
+        mkdir -p ~/backup_temp/$backup_name/additional-folders
+        
+        for folder in $REMOTE_ADDITIONAL_FOLDERS; do
+            info "Copying folder: $folder..."
+            if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "
+                LC_ALL=C [ -d '$wp_dir/$folder' ] && 
+                cp -r '$wp_dir/$folder' ~/backup_temp/$backup_name/additional-folders/ && 
+                echo 'FOLDER_COPIED'
+            " | grep -q "FOLDER_COPIED"; then
+                success "Folder copied: $folder"
+            else
+                warning "Failed to copy folder: $folder"
+            fi
+        done
     fi
     
     # Step 4: Create archive
@@ -1251,6 +1353,9 @@ import_from_archive() {
     
     # Process wp-content
     process_wp_content_import "$extract_dir" "$wp_root"
+
+    # Process additional folders (NEW)
+    process_additional_folders_import "$extract_dir" "$wp_root"
     
     # Ensure WordPress core files are present
     ensure_wordpress_core
@@ -1393,6 +1498,14 @@ validate_backup_structure() {
         errors+=("wp-content not found (expected directory or wp-content.tar.gz)")
     fi
     
+    # Check for additional folders (optional)
+    if [ -d "$extract_dir/additional-folders" ]; then
+        local additional_count=$(find "$extract_dir/additional-folders" -maxdepth 1 -type d | wc -l)
+        if [ "$additional_count" -gt 1 ]; then
+            info "Found $((additional_count - 1)) additional folder(s)"
+        fi
+    fi
+    
     # Show warnings
     if [ ${#warnings[@]} -gt 0 ]; then
         for warn in "${warnings[@]}"; do
@@ -1412,8 +1525,11 @@ validate_backup_structure() {
         return 1
     fi
     
-    success "✓ Backup structure valid (wp-content: $wp_content_source, database: $(basename "${db_files[0]}"))"
-    return 0
+    # Update success message to include additional folders info
+    local additional_info=""
+    [ -d "$extract_dir/additional-folders" ] && additional_info=", additional folders: yes"
+    
+    success "✓ Backup structure valid (wp-content: $wp_content_source, database: $(basename "${db_files[0]}")$additional_info)"
 }
 
 check_database_setup() {
@@ -1500,6 +1616,62 @@ process_wp_content_import() {
     fi
     
     success "wp-content imported successfully"
+}
+
+process_additional_folders_import() {
+    local extract_dir=$1
+    local wp_root=$2
+    
+    if [ ! -d "$extract_dir/additional-folders" ]; then
+        debug "No additional folders to import"
+        return 0
+    fi
+    
+    info "Importing additional folders..."
+    
+    # List folders to import
+    local folders=($(find "$extract_dir/additional-folders" -maxdepth 1 -type d ! -path "$extract_dir/additional-folders" -printf "%f\n"))
+    
+    if [ ${#folders[@]} -eq 0 ]; then
+        debug "No additional folders found in backup"
+        return 0
+    fi
+    
+    info "Found ${#folders[@]} additional folder(s): ${folders[*]}"
+    
+    for folder in "${folders[@]}"; do
+        local source="$extract_dir/additional-folders/$folder"
+        local dest="$wp_root/$folder"
+        
+        # Backup existing folder if it exists
+        if [ -d "$dest" ]; then
+            warning "Folder exists: $folder - creating backup"
+            sudo mv "$dest" "${dest}.backup-$(date +%Y%m%d-%H%M%S)"
+        fi
+        
+        # Copy folder
+        info "Copying $folder to WordPress root..."
+        sudo cp -a "$source" "$dest"
+        
+        # Set ownership (same as WordPress files)
+        local wp_user=$(load_state "WP_USER")
+        sudo chown -R "$wp_user:wordpress" "$dest"
+        
+        # Set permissions based on folder type
+        if [[ "$folder" =~ ^(assets|images|media|files|downloads)$ ]]; then
+            # Media/asset folders - readable
+            sudo find "$dest" -type f -exec chmod 644 {} \;
+            sudo find "$dest" -type d -exec chmod 755 {} \;
+        else
+            # Other folders - standard
+            sudo find "$dest" -type f -exec chmod 644 {} \;
+            sudo find "$dest" -type d -exec chmod 755 {} \;
+        fi
+        
+        success "Imported: $folder"
+    done
+    
+    success "Additional folders imported successfully"
 }
 
 update_site_urls() {
