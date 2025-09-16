@@ -478,6 +478,18 @@ show_completion_summary() {
     local domain=$(load_state "DOMAIN")
     local wp_root=$(load_state "WP_ROOT")
     
+    # Add verification before showing completion
+    echo
+    if ! verify_wordpress_stack; then
+        warning "Installation completed with issues - see verification results above"
+        echo
+        info "Common fixes:"
+        info "  • Start services: sudo systemctl start php*-fpm nginx"
+        info "  • Fix permissions: sudo chown wpuser:wordpress $wp_root/wp-config.php"
+        info "  • Check logs: tail -f /var/log/nginx/*error.log"
+        echo
+    fi
+    
     echo
     success "=== WordPress Installation Complete ==="
     echo
