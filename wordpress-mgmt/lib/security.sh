@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/security.sh - Security hardening and fail2ban
-# Version: 3.0.0
+# Version: 3.0.1
 
 apply_security() {
     info "Applying security hardening..."
