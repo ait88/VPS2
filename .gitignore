@@ -18,6 +18,7 @@ setup_state.*
 **/logs/
 **/tmp/
 **/temp/
+lastrun.txt
 
 # Backup files
 *.backup
