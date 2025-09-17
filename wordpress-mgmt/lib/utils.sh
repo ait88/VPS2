@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/utils.sh - Common utility functions
-# Version: 3.0.3
+# Version: 3.0.4
 
 # ===== SYSTEM CHECKS =====
 check_sudo() {
@@ -47,19 +47,40 @@ validate_email() {
 }
 
 # ===== USER INTERACTION =====
+# old confirm function changed due to error in cron import, leaving this here in case something breaks elsewhere.
+#confirm() {
+#    local prompt=$1
+#    local default=${2:-N}
+    
+#    if [ "$default" = "Y" ]; then
+#        prompt="${prompt} [Y/n]: "
+#    else
+#        prompt="${prompt} [y/N]: "
+#    fi
+    
+#    echo -ne "\033[1;33m${prompt}\033[0m"
+#    read -r response
+    
+#    response=${response:-$default}
+#    [[ "$response" =~ ^[Yy]$ ]]
+#}
+
 confirm() {
     local prompt=$1
     local default=${2:-N}
-    
+
     if [ "$default" = "Y" ]; then
         prompt="${prompt} [Y/n]: "
     else
         prompt="${prompt} [y/N]: "
     fi
-    
-    echo -ne "\033[1;33m${prompt}\033[0m"
-    read -r response
-    
+
+    # Prompt the user on the terminal
+    echo -ne "\033[1;33m${prompt}\033[0m" >&2
+
+    # Read the response directly from the terminal device
+    read -r response </dev/tty
+
     response=${response:-$default}
     [[ "$response" =~ ^[Yy]$ ]]
 }
