@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.11
+# Version: 3.0.12
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -1114,6 +1114,12 @@ create_and_transfer_backup() {
             fi
         done
     fi
+
+    # Step 3c: Record selected folders for import process
+    if [ -n "${REMOTE_ADDITIONAL_FOLDERS:-}" ]; then
+        info "Recording selected folder list..."
+        echo "$REMOTE_ADDITIONAL_FOLDERS" | tr ' ' '\n' | sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cat > ~/backup_temp/$backup_name/selected_folders.txt"
+    fi
     
     # Step 4: Create archive
     info "Creating backup archive..."
@@ -1651,19 +1657,49 @@ process_additional_folders_import() {
     
     info "Importing additional folders..."
     
-    # List folders to import
-    local folders=($(find "$extract_dir/additional-folders" -maxdepth 1 -type d ! -path "$extract_dir/additional-folders" -printf "%f\n"))
+    # Get the originally selected folders (stored during backup creation)
+    # If not available, fall back to discovering top-level directories
+    local selected_folders_file="$extract_dir/selected_folders.txt"
+    local folders=()
+    
+    if [ -f "$selected_folders_file" ]; then
+        # Use the original selection list
+        while IFS= read -r folder; do
+            [ -n "$folder" ] && folders+=("$folder")
+        done < "$selected_folders_file"
+        info "Using original folder selection: ${folders[*]}"
+    else
+        # Fallback: discover only immediate subdirectories (not recursive)
+        folders=($(find "$extract_dir/additional-folders" -maxdepth 1 -type d ! -path "$extract_dir/additional-folders" -printf "%f\n"))
+        warning "No selection record found, discovered ${#folders[@]} folders"
+        
+        # If too many folders found, this indicates the nested directory problem
+        if [ ${#folders[@]} -gt 10 ]; then
+            error "Too many folders discovered (${#folders[@]}). This suggests a backup structure issue."
+            echo "First 10 folders found: ${folders[@]:0:10}"
+            echo
+            if ! confirm "This may be due to nested directories. Continue with importing all discovered folders?" N; then
+                warning "Skipping additional folder import"
+                return 0
+            fi
+        fi
+    fi
     
     if [ ${#folders[@]} -eq 0 ]; then
         debug "No additional folders found in backup"
         return 0
     fi
     
-    info "Found ${#folders[@]} additional folder(s): ${folders[*]}"
+    info "Importing ${#folders[@]} additional folder(s)..."
     
     for folder in "${folders[@]}"; do
         local source="$extract_dir/additional-folders/$folder"
         local dest="$wp_root/$folder"
+        
+        if [ ! -d "$source" ]; then
+            warning "Source folder not found: $folder"
+            continue
+        fi
         
         # Backup existing folder if it exists
         if [ -d "$dest" ]; then
@@ -1680,7 +1716,7 @@ process_additional_folders_import() {
         sudo chown -R "$wp_user:wordpress" "$dest"
         
         # Set permissions based on folder type
-        if [[ "$folder" =~ ^(assets|images|media|files|downloads)$ ]]; then
+        if [[ "$folder" =~ ^(assets|images|media|files|downloads|Pictures)$ ]]; then
             # Media/asset folders - readable
             sudo find "$dest" -type f -exec chmod 644 {} \;
             sudo find "$dest" -type d -exec chmod 755 {} \;
