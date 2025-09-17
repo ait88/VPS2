@@ -494,7 +494,7 @@ download_backup_file() {
 import_from_directory() {
     echo
     echo "You can provide either:"
-    echo "• Path to backup archive (.tar.gz file)"
+    echo "• Path to backup archive file"
     echo "• Path to directory containing backup archives"
     echo "• Path to extracted backup directory"
     echo
