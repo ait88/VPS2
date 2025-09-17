@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/backup.sh - Backup system configuration
-# Version: 3.0.7
+# Version: 3.0.8
 
 setup_backup_system() {
     info "Setting up backup system..."
@@ -163,6 +163,7 @@ log "Configuration copied"
 log "Backing up wp-content..."
 rsync -a \
     --exclude='cache/' \
+    --exclude='wflogs/' \
     --exclude='*.log' \
     --exclude='backup-*' \
     --exclude='upgrade/' \
