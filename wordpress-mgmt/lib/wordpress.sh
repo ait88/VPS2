@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.16
+# Version: 3.0.17
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -1532,13 +1532,18 @@ configure_wordpress_import() {
     local db_name=$(load_state "DB_NAME")
     local db_user=$(load_state "DB_USER")
     local db_pass=$(load_state "DB_PASS")
-    
+
     info "Configuring WordPress for imported site..."
-    
-    # Check if imported wp-config.php exists and is usable
+
+    # Check if a usable wp-config.php exists
     if [ -f "$extract_dir/wp-config.php" ]; then
-        info "Using imported wp-config.php as base..."
-        sudo cp "$extract_dir/wp-config.php" "$wp_root/wp-config.php"
+        # If the source and destination are different, copy the file
+        if [ "$extract_dir" != "$wp_root" ]; then
+            info "Using imported wp-config.php as base..."
+            sudo cp "$extract_dir/wp-config.php" "$wp_root/wp-config.php"
+        else
+            info "Configuring existing wp-config.php in place..."
+        fi
     elif [ -f "$wp_root/wp-config-sample.php" ]; then
         info "Creating wp-config.php from sample..."
         sudo cp "$wp_root/wp-config-sample.php" "$wp_root/wp-config.php"
@@ -1546,21 +1551,21 @@ configure_wordpress_import() {
         error "Neither imported wp-config.php nor wp-config-sample.php found"
         return 1
     fi
-    
+
     # Update database credentials in wp-config.php
     info "Updating database credentials..."
     sudo sed -i "s/define( *'DB_NAME'.*/define( 'DB_NAME', '$db_name' );/" "$wp_root/wp-config.php"
     sudo sed -i "s/define( *'DB_USER'.*/define( 'DB_USER', '$db_user' );/" "$wp_root/wp-config.php"
     sudo sed -i "s/define( *'DB_PASSWORD'.*/define( 'DB_PASSWORD', '$db_pass' );/" "$wp_root/wp-config.php"
     sudo sed -i "s/define( *'DB_HOST'.*/define( 'DB_HOST', 'localhost' );/" "$wp_root/wp-config.php"
-    
+
     # Update URLs for new domain
     info "Updating domain configuration..."
-    
+
     # Remove any existing WP_HOME/WP_SITEURL definitions
     sudo sed -i "/define.*WP_HOME/d" "$wp_root/wp-config.php"
     sudo sed -i "/define.*WP_SITEURL/d" "$wp_root/wp-config.php"
-    
+
     # Add new domain configuration before the closing PHP tag
     sudo sed -i "/\/\* That's all, stop editing/i\\
 // Domain configuration for imported site\\
@@ -1568,11 +1573,11 @@ define( 'WP_HOME', 'https://$domain' );\\
 define( 'WP_SITEURL', 'https://$domain' );\\
 define( 'FORCE_SSL_ADMIN', true );\\
 " "$wp_root/wp-config.php"
-    
+
     # Ensure proper file permissions
     sudo chown "$(load_state "WP_USER"):wordpress" "$wp_root/wp-config.php"
     sudo chmod 640 "$wp_root/wp-config.php"
-    
+
     debug "WordPress configuration updated for import"
 }
 
