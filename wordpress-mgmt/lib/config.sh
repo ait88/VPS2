@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/config.sh - Interactive configuration gathering
-# Version: 3.0.0
+# Version: 3.0.1
 
 # Color definitions for consistent output
 RED='\033[0;31m'
@@ -190,11 +190,11 @@ configure_interactive() {
         info "Select default plugins to install:"
         
         local plugins=(
-            "wordfence:Security plugin"
-            "redis-cache:Redis object cache"
-            "wp-mail-smtp:Email configuration"
-            "updraftplus:Backup plugin"
-            "wordpress-seo:Yoast SEO"
+            "wordfence:WordFence Security plugin"
+            "redis-cache:Redis object cache plugin"
+            "wp-mail-smtp:WP Mail SMTP plugin"
+            "updraftplus:Updraft Plus Backup plugin"
+            "wordpress-seo:Yoast SEO plugin"
         )
         
         local selected_plugins=()
