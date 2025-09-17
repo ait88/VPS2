@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.17
+# Version: 3.0.18
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -223,20 +223,21 @@ set_wordpress_permissions() {
     local wp_root=$(load_state "WP_ROOT")
     local wp_user=$(load_state "WP_USER")
     local php_user=$(load_state "PHP_USER" "php-fpm")
-    
+
     info "Setting secure permissions..."
-    
+
     # Set ownership
     sudo chown -R "$wp_user:wordpress" "$wp_root"
-    
+
     # Base permissions
     sudo find "$wp_root" -type d -exec chmod 755 {} \;
     sudo find "$wp_root" -type f -exec chmod 644 {} \;
-    
+
     # Secure wp-config.php
     sudo chmod 640 "$wp_root/wp-config.php"
-    sudo chown "$wp_user:$php_user" "$wp_root/wp-config.php"
-    
+    # Corrected the group from $php_user to "wordpress"
+    sudo chown "$wp_user:wordpress" "$wp_root/wp-config.php"
+
     # Writable directories for PHP user
     local writable_dirs=(
         "wp-content/uploads"
@@ -244,13 +245,13 @@ set_wordpress_permissions() {
         "wp-content/upgrade"
         "wp-content/wflogs"
     )
-    
+
     for dir in "${writable_dirs[@]}"; do
         sudo mkdir -p "$wp_root/$dir"
         sudo chown -R "$php_user:wordpress" "$wp_root/$dir"
         sudo chmod -R 775 "$wp_root/$dir"
     done
-    
+
     # Protect sensitive files
     local protected_files=(
         ".htaccess"
@@ -258,11 +259,11 @@ set_wordpress_permissions() {
         "readme.html"
         "license.txt"
     )
-    
+
     for file in "${protected_files[@]}"; do
         [ -f "$wp_root/$file" ] && sudo chmod 640 "$wp_root/$file"
     done
-    
+
     debug "Permissions set securely"
 }
 
