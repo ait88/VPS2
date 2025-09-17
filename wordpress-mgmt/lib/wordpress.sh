@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.1.0
+# Version: 3.1.1
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -551,14 +551,14 @@ handle_directory_import() {
         # Found archives - let user select
         echo
         echo "Found ${#archives[@]} backup archives in directory:"
-        echo "────────────────────────────────────────────────"
+        echo "------------------------------------------------"
         
         local i=1
         for archive in "${archives[@]}"; do
             local file_name=$(basename "$archive")
             local file_size=$(du -h "$archive" | cut -f1)
             local file_date=$(stat -c %y "$archive" | cut -d' ' -f1)
-            echo "$i) $file_name $file_size $file_date"
+            echo "$i) $file_name ($file_size, $file_date)"
             ((i++))
         done
         
@@ -588,8 +588,8 @@ handle_directory_import() {
             ls -la "$dir_path" | head -10
             echo
             echo "Expected either:"
-            echo "• .tar.gz backup archives"
-            echo "• Extracted backup with wp-config.php, db.sql*, and wp-content/"
+            echo "- .tar.gz backup archives"
+            echo "- Extracted backup with wp-config.php, db.sql*, and wp-content/"
             return 1
         fi
     fi
