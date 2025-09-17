@@ -530,7 +530,7 @@ import_from_directory() {
         echo
         echo "Please check:"
         echo "• File/directory exists"
-        echo "• Path is correct (use tab completion)"
+        echo "• Path is correct use tab completion"
         echo "• You have read permissions"
         echo
         echo "Example paths:"
