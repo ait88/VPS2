@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.12
+# Version: 3.0.14
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -1094,18 +1094,18 @@ create_and_transfer_backup() {
         warning "wp-content directory not found - continuing without it"
     fi
 
-    # Step 3b: Copy additional folders if specified
+    # Step 3b: Copy additional folders if specified (SIMPLE VERSION)
     if [ -n "${REMOTE_ADDITIONAL_FOLDERS:-}" ]; then
         info "Copying additional folders..."
         
-        # Create container for additional folders
-        mkdir -p ~/backup_temp/$backup_name/additional-folders
-        
         for folder in $REMOTE_ADDITIONAL_FOLDERS; do
             info "Copying folder: $folder..."
+            
             if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "
                 LC_ALL=C [ -d '$wp_dir/$folder' ] && 
+                mkdir -p ~/backup_temp/$backup_name/additional-folders &&
                 cp -r '$wp_dir/$folder' ~/backup_temp/$backup_name/additional-folders/ && 
+                [ -d ~/backup_temp/$backup_name/additional-folders/$folder ] &&
                 echo 'FOLDER_COPIED'
             " | grep -q "FOLDER_COPIED"; then
                 success "Folder copied: $folder"
