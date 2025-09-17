@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.19
+# Version: 3.1.0
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -494,9 +494,9 @@ download_backup_file() {
 import_from_directory() {
     echo
     echo "You can provide either:"
-    echo "• Path to backup archive file"
-    echo "• Path to directory containing backup archives"
-    echo "• Path to extracted backup directory"
+    echo " * Path to backup archive file"
+    echo " * Path to directory containing backup archives"
+    echo " * Path to extracted backup directory"
     echo
     read -p "Enter path to backup archive or directory: " backup_path
     
@@ -558,7 +558,7 @@ handle_directory_import() {
             local file_name=$(basename "$archive")
             local file_size=$(du -h "$archive" | cut -f1)
             local file_date=$(stat -c %y "$archive" | cut -d' ' -f1)
-            echo "$i) $file_name ($file_size, $file_date)"
+            echo "$i) $file_name $file_size $file_date"
             ((i++))
         done
         
