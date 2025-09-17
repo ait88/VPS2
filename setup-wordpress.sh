@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ===== CONFIGURATION =====
-SCRIPT_VERSION="3.0.2"
+SCRIPT_VERSION="3.0.3"
 SCRIPT_URL="https://raw.githubusercontent.com/ait88/VPS2/main/setup-wordpress.sh"
 BASE_URL="https://raw.githubusercontent.com/ait88/VPS2/main/wordpress-mgmt"
 
@@ -457,18 +457,20 @@ show_utils_menu() {
     echo "2) Change Primary Domain"
     echo "3) Remove WordPress (Nuke System)"
     echo "4) Test SSH Import Connectivity"
-    echo "5) Back to Main Menu"
+    echo "5) Migrate Cron Jobs from Remote Server"
+    echo "6) Back to Main Menu"
     echo
-    read -p "Enter your choice [1-5]: " choice
+    read -p "Enter your choice [1-6]: " choice
     echo
-    
+
     case $choice in
         1) fix_permissions ;;
         2) change_primary_domain ;;
         3) nuke_all ;;
         4) test_ssh_import && show_utils_menu ;;
-        5) show_menu ;;
-        *) 
+        5) migrate_cron_jobs && show_utils_menu ;; 
+        6) show_menu ;;                           
+        *)
             error "Invalid choice: $choice"
             show_utils_menu
             ;;
@@ -693,6 +695,122 @@ update_primary_domain() {
     info "Run: sudo certbot --nginx -d $new_domain -d www.$new_domain"
     
     return 0
+}
+
+migrate_cron_jobs() {
+    info "=== Migrate Cron Jobs from Remote Server ==="
+
+    # Load required modules
+    # NOTE: It's best to move SSH functions from wordpress.sh to utils.sh
+    for module in utils.sh wordpress.sh; do
+        load_module "$module"
+    done
+
+    # Ensure sshpass is available and get credentials
+    ensure_sshpass || return 1
+    get_ssh_credentials || return 1
+    test_ssh_connection || return 1
+
+    # --- Get timezone information ---
+    info "Fetching timezone information..."
+    local remote_tz_string=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 'date +"%z"')
+    local local_tz_string=$(date +"%z")
+
+    # Helper function to convert offset string (e.g., +0930) to minutes
+    offset_to_minutes() {
+        local offset=$1
+        local sign=${offset:0:1}
+        local hours=${offset:1:2}
+        local minutes=${offset:3:2}
+        # Use 10# to force base-10 interpretation for numbers like 08 or 09
+        local total_minutes=$((10#$hours * 60 + 10#$minutes))
+        [ "$sign" = "-" ] && total_minutes=$(( -total_minutes ))
+        echo $total_minutes
+    }
+
+    local remote_offset=$(offset_to_minutes "$remote_tz_string")
+    local local_offset=$(offset_to_minutes "$local_tz_string")
+    local tz_diff_minutes=$((remote_offset - local_offset))
+
+    info "Remote timezone offset: $remote_tz_string ($remote_offset minutes from UTC)"
+    info "Local timezone offset:  $local_tz_string ($local_offset minutes from UTC)"
+    info "Time difference: $tz_diff_minutes minutes"
+
+    # --- Get remote crontab ---
+    info "Fetching remote cron jobs for user '$SSH_USER'..."
+    local remote_cron=$(sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 'crontab -l 2>/dev/null')
+
+    if [ -z "$remote_cron" ]; then
+        success "No cron jobs found for remote user. Nothing to migrate."
+        return 0
+    fi
+
+    echo "Found the following remote cron jobs:"
+    echo "------------------------------------"
+    printf "%s\n" "$remote_cron"
+    echo "------------------------------------"
+
+    if ! confirm "Proceed with migrating these cron jobs?" Y; then
+        return 0
+    fi
+
+    local wp_user=$(load_state "WP_USER" "wpuser")
+
+    # --- Loop, convert, and confirm each cron job ---
+    echo "$remote_cron" | while IFS= read -r line; do
+        if [[ -z "$line" || "$line" =~ ^\s*# ]]; then
+            continue # Skip comments and empty lines
+        fi
+
+        # Parse the cron line
+        read -r min hour dom mon dow cmd <<<"$line"
+
+        local new_min=$min
+        local new_hour=$hour
+        local converted=false
+
+        # Only attempt conversion for simple numeric schedules (e.g., "30 4 * * *")
+        if [[ "$min" =~ ^[0-9]+$ && "$hour" =~ ^[0-9]+$ ]]; then
+            local total_minutes=$((10#$hour * 60 + 10#$min))
+            local new_total_minutes=$((total_minutes - tz_diff_minutes))
+
+            # Handle day rollovers by wrapping around 1440 minutes (24 hours)
+            new_total_minutes=$(((new_total_minutes % 1440 + 1440) % 1440))
+
+            new_hour=$((new_total_minutes / 60))
+            new_min=$((new_total_minutes % 60))
+            converted=true
+        fi
+
+        local new_cron_line="$new_min $new_hour $dom $mon $dow $cmd"
+        
+        echo
+        info "Processing cron job:"
+        echo "  Remote:      $line"
+        if [ "$converted" = true ]; then
+            echo "  Suggested:   $new_cron_line"
+            if confirm "Add this CONVERTED cron job for local user '$wp_user'?" Y; then
+                 (sudo crontab -u "$wp_user" -l 2>/dev/null | grep -vF -- "$cmd"; echo "$new_cron_line") | sudo crontab -u "$wp_user" -
+                 success "Cron job added."
+            else
+                 info "Skipping cron job."
+            fi
+        else
+            warning "Cannot auto-convert complex schedule (e.g., */5, 1-5)."
+            echo "  Unmodified:  $line"
+            if confirm "Add this cron job UNMODIFIED for local user '$wp_user'?" Y; then
+                 (sudo crontab -u "$wp_user" -l 2>/dev/null | grep -vF -- "$cmd"; echo "$line") | sudo crontab -u "$wp_user" -
+                 success "Cron job added unmodified."
+            else
+                 info "Skipping cron job."
+            fi
+        fi
+    done
+
+    success "Cron job migration complete."
+    echo
+    info "Current cron jobs for user '$wp_user':"
+    sudo crontab -u "$wp_user" -l
 }
 
 test_ssh_import() {
