@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.15
+# Version: 3.0.16
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -454,7 +454,8 @@ import_from_url() {
         local file_age=$(($(date +%s) - $(stat -c %Y "$temp_file")))
         local file_size=$(du -h "$temp_file" | cut -f1)
         
-        echo "Found existing download: $filename ($file_size, $(($file_age / 3600)) hours old)"
+        local hours_old=$(($file_age / 3600))
+        echo "Found existing download: $filename ($file_size, $hours_old hours old)"
         
         if confirm "Use existing file instead of re-downloading?" Y; then
             info "Using existing file: $temp_file"
