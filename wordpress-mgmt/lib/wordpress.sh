@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.1.1
+# Version: 3.1.2
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -545,7 +545,10 @@ handle_directory_import() {
     local dir_path=$1
     
     # Look for .tar.gz archives in the directory
-    local archives=($(find "$dir_path" -maxdepth 1 -name "*.tar.gz" -type f | sort -r))
+    local archives=()
+    while IFS= read -r -d '' archive; do
+        archives+=("$archive")
+    done < <(find "$dir_path" -maxdepth 1 -name "*.tar.gz" -type f -print0 | sort -zr)
     
     if [ ${#archives[@]} -gt 0 ]; then
         # Found archives - let user select
@@ -555,10 +558,16 @@ handle_directory_import() {
         
         local i=1
         for archive in "${archives[@]}"; do
-            local file_name=$(basename "$archive")
-            local file_size=$(du -h "$archive" | cut -f1)
-            local file_date=$(stat -c %y "$archive" | cut -d' ' -f1)
-            echo "$i) $file_name ($file_size, $file_date)"
+            local file_name
+            local file_size
+            local file_date
+            
+            file_name=$(basename "$archive")
+            file_size=$(du -h "$archive" | cut -f1)
+            file_date=$(stat -c %y "$archive" | cut -d' ' -f1)
+            
+            # Use printf instead of echo to avoid parsing issues
+            printf "%d) %s (%s, %s)\n" "$i" "$file_name" "$file_size" "$file_date"
             ((i++))
         done
         
