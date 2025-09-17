@@ -550,7 +550,7 @@ handle_directory_import() {
     if [ ${#archives[@]} -gt 0 ]; then
         # Found archives - let user select
         echo
-        echo "Found ${#archives[@]} backup archive(s) in directory:"
+        echo "Found ${#archives[@]} backup archives in directory:"
         echo "────────────────────────────────────────────────"
         
         local i=1
