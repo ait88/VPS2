@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.14
+# Version: 3.0.15
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -420,15 +420,17 @@ import_wordpress_site() {
     echo "Import source options:"
     echo "1) Remote URL"
     echo "2) Local directory"
-    echo "3) Remote SSH server"  # NEW OPTION
+    echo "3) Remote SSH server (archive method)"
+    echo "4) Direct SSH streaming (efficient, no temp files)
     echo
     
-    read -p "Select import source [1-3]: " import_choice
+    read -p "Select import source [1-4]: " import_choice
     
     case $import_choice in
         1) import_from_url ;;
         2) import_from_directory ;;
-        3) import_from_ssh ;;     # NEW
+        3) import_from_ssh ;;
+        4) import_via_ssh_stream ;;
         *) error "Invalid choice"; return 1 ;;
     esac
     
@@ -629,6 +631,84 @@ import_from_extracted_directory() {
     save_state "WP_INSTALL_METHOD" "import"
     
     success "WordPress site imported successfully from directory"
+}
+
+import_via_ssh_stream() {
+    info "=== Direct SSH streaming import (no temp files) ==="
+    
+    # Ensure sshpass is available  
+    ensure_sshpass || return 1
+    
+    # Get SSH credentials and discover site
+    get_ssh_credentials || return 1
+    test_ssh_connection || return 1
+    
+    local selected_wp_dir
+    selected_wp_dir=$(discover_and_select_wordpress) || return 1
+    
+    local additional_folders
+    additional_folders=$(discover_additional_folders "$selected_wp_dir") || true
+    REMOTE_ADDITIONAL_FOLDERS="$additional_folders"
+    
+    # Extract and confirm DB credentials
+    local db_creds
+    db_creds=$(extract_remote_db_creds "$selected_wp_dir") || return 1
+    confirm_database_settings "$db_creds" || return 1
+    
+    local wp_root=$(load_state "WP_ROOT")
+    local wp_user=$(load_state "WP_USER")
+    
+    info "Starting direct streaming import..."
+    
+    # 1. Stream database directly (no temp files)
+    info "Streaming database directly..."
+    if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+        "mysqldump -h'$REMOTE_DB_HOST' -u'$REMOTE_DB_USER' -p'$REMOTE_DB_PASS' '$REMOTE_DB_NAME'" | \
+        mysql -u"$(load_state "DB_USER")" -p"$(load_state "DB_PASS")" "$(load_state "DB_NAME")"; then
+        success "Database streamed successfully"
+    else
+        error "Database streaming failed"
+        return 1
+    fi
+    
+    # 2. Stream WordPress files directly (no temp files on either server)
+    info "Streaming WordPress files..."
+    
+    # Build file list for tar
+    local tar_includes="wp-config.php wp-content"
+    if [ -n "$REMOTE_ADDITIONAL_FOLDERS" ]; then
+        tar_includes="$tar_includes $REMOTE_ADDITIONAL_FOLDERS"
+    fi
+    
+    # Create WordPress root and stream tar directly into it
+    sudo mkdir -p "$wp_root"
+    
+    if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+        "cd '$selected_wp_dir' && tar -czf - --exclude='wp-content/cache' --exclude='wp-content/wflogs' --exclude='wp-content/backup*' $tar_includes" | \
+        sudo tar -xzf - -C "$wp_root"; then
+        success "WordPress files streamed successfully"
+    else
+        error "WordPress file streaming failed"
+        return 1
+    fi
+    
+    # 3. Ensure WordPress core files are present
+    ensure_wordpress_core
+    
+    # 4. Configure WordPress for new environment  
+    configure_wordpress_import "$wp_root"
+    
+    # 5. Set proper permissions
+    sudo chown -R "$wp_user:wordpress" "$wp_root"
+    set_wordpress_permissions
+    
+    # 6. Update URLs for new domain
+    update_site_urls "$wp_root"
+    
+    save_state "WORDPRESS_INSTALLED" "true"
+    save_state "WP_INSTALL_METHOD" "ssh_stream"
+    
+    success "SSH streaming import completed successfully"
 }
 
 # Import WordPress site via SSH
