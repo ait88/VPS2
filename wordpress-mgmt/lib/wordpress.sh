@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.18
+# Version: 3.0.19
 
 install_wordpress() {
     info "Installing WordPress..."
