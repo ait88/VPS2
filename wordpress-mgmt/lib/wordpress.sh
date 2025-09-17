@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.1.2
+# Version: 3.0.16
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -421,7 +421,7 @@ import_wordpress_site() {
     echo "1) Remote URL"
     echo "2) Local directory"
     echo "3) Remote SSH server (archive method)"
-    echo "4) Direct SSH streaming (efficient, no temp files)
+    echo "4) Direct SSH streaming (efficient, no temp files)"
     echo
     
     read -p "Select import source [1-4]: " import_choice
@@ -454,8 +454,8 @@ import_from_url() {
         local file_age=$(($(date +%s) - $(stat -c %Y "$temp_file")))
         local file_size=$(du -h "$temp_file" | cut -f1)
         
-        echo "Found existing file: $filename"
-        echo "Size: $file_size, Age: $hours_old hours"
+        local hours_old=$(($file_age / 3600))
+        echo "Found existing download: $filename ($file_size, $hours_old hours old)"
         
         if confirm "Use existing file instead of re-downloading?" Y; then
             info "Using existing file: $temp_file"
@@ -494,9 +494,9 @@ download_backup_file() {
 import_from_directory() {
     echo
     echo "You can provide either:"
-    echo " * Path to backup archive file"
-    echo " * Path to directory containing backup archives"
-    echo " * Path to extracted backup directory"
+    echo "• Path to backup archive (.tar.gz file)"
+    echo "• Path to directory containing backup archives"
+    echo "• Path to extracted backup directory"
     echo
     read -p "Enter path to backup archive or directory: " backup_path
     
@@ -530,7 +530,7 @@ import_from_directory() {
         echo
         echo "Please check:"
         echo "• File/directory exists"
-        echo "• Path is correct use tab completion"
+        echo "• Path is correct (use tab completion)"
         echo "• You have read permissions"
         echo
         echo "Example paths:"
@@ -545,29 +545,20 @@ handle_directory_import() {
     local dir_path=$1
     
     # Look for .tar.gz archives in the directory
-    local archives=()
-    while IFS= read -r -d '' archive; do
-        archives+=("$archive")
-    done < <(find "$dir_path" -maxdepth 1 -name "*.tar.gz" -type f -print0 | sort -zr)
+    local archives=($(find "$dir_path" -maxdepth 1 -name "*.tar.gz" -type f | sort -r))
     
     if [ ${#archives[@]} -gt 0 ]; then
         # Found archives - let user select
         echo
-        echo "Found ${#archives[@]} backup archives in directory:"
-        echo "------------------------------------------------"
+        echo "Found ${#archives[@]} backup archive(s) in directory:"
+        echo "────────────────────────────────────────────────"
         
         local i=1
         for archive in "${archives[@]}"; do
-            local file_name
-            local file_size
-            local file_date
-            
-            file_name=$(basename "$archive")
-            file_size=$(du -h "$archive" | cut -f1)
-            file_date=$(stat -c %y "$archive" | cut -d' ' -f1)
-            
-            # Use printf instead of echo to avoid parsing issues
-            printf "%d) %s (%s, %s)\n" "$i" "$file_name" "$file_size" "$file_date"
+            local file_name=$(basename "$archive")
+            local file_size=$(du -h "$archive" | cut -f1)
+            local file_date=$(stat -c %y "$archive" | cut -d' ' -f1)
+            echo "$i) $file_name ($file_size, $file_date)"
             ((i++))
         done
         
@@ -597,8 +588,8 @@ handle_directory_import() {
             ls -la "$dir_path" | head -10
             echo
             echo "Expected either:"
-            echo "- .tar.gz backup archives"
-            echo "- Extracted backup with wp-config.php, db.sql*, and wp-content/"
+            echo "• .tar.gz backup archives"
+            echo "• Extracted backup with wp-config.php, db.sql*, and wp-content/"
             return 1
         fi
     fi
