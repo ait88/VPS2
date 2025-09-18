@@ -1,51 +1,53 @@
 #!/bin/bash
 # wordpress-mgmt/lib/users.sh - User management with security isolation
-# Version: 3.0.2
+# Version: 3.0.3 (SFTP Integration)
 
 setup_users() {
     info "Setting up users with security isolation..."
-    
+
     if state_exists "USERS_CONFIGURED"; then
         info "✓ Users already configured"
         return 0
     fi
-    
+
     # Define users for service isolation
     local wp_user="${WP_USER:-wpuser}"
     local php_user="${PHP_USER:-php-fpm}"
     local redis_user="${REDIS_USER:-redis}"
     local backup_user="${BACKUP_USER:-wp-backup}"
-    
+    local sftp_user="wp-sftp" # New SFTP user
+
     # Save user configuration
     save_state "WP_USER" "$wp_user"
     save_state "PHP_USER" "$php_user"
     save_state "REDIS_USER" "$redis_user"
     save_state "BACKUP_USER" "$backup_user"
-    
+    save_state "SFTP_USER" "$sftp_user"
+
     # Create users
     show_progress 1 6 "Creating system users"
-    create_system_users "$wp_user" "$php_user" "$redis_user" "$backup_user"
-    
+    create_system_users "$wp_user" "$php_user" "$redis_user" "$backup_user" "$sftp_user"
+
     # Setup security groups
     show_progress 2 6 "Configuring security groups"
-    setup_security_groups "$wp_user" "$php_user" "$backup_user"
-    
+    setup_security_groups "$wp_user" "$php_user" "$backup_user" "$sftp_user"
+
     # Configure backup access
     show_progress 3 6 "Setting up backup user access"
     setup_backup_user "$backup_user" "$wp_user"
-    
+
     # Setup directory structure
     show_progress 4 6 "Creating directory structure"
     setup_directory_structure "$wp_user"
-    
+
     # Configure sudo restrictions
     show_progress 5 6 "Applying sudo restrictions"
-    configure_sudo_restrictions "$wp_user" "$php_user" "$redis_user" "$backup_user"
-    
+    configure_sudo_restrictions "$wp_user" "$php_user" "$redis_user" "$backup_user" "$sftp_user"
+
     # Verify setup
     show_progress 6 6 "Verifying user configuration"
-    verify_user_setup "$wp_user" "$php_user" "$redis_user" "$backup_user"
-    
+    verify_user_setup "$wp_user" "$php_user" "$redis_user" "$backup_user" "$sftp_user"
+
     save_state "USERS_CONFIGURED" "true"
     success "✓ Users configured with security isolation"
 }
@@ -55,6 +57,7 @@ create_system_users() {
     local php_user=$2
     local redis_user=$3
     local backup_user=$4
+    local sftp_user=$5
     
     # WordPress user (owns WordPress files)
     if ! id "$wp_user" &>/dev/null; then
@@ -91,12 +94,25 @@ create_system_users() {
         sudo chmod 750 "/home/$backup_user"
         debug "Fixed backup user home directory ownership"
     fi
+
+    # SFTP user (for file uploads, chrooted)
+    if [ "$(load_state "ENABLE_SFTP")" = "true" ]; then
+        if ! id "$sftp_user" &>/dev/null; then
+            info "Creating SFTP user: $sftp_user"
+            sudo useradd -s /sbin/nologin -d "/var/sftp/$sftp_user" -M "$sftp_user"
+            # Set a password for the SFTP user
+            local sftp_pass=$(load_state "SFTP_PASS")
+            echo "$sftp_user:$sftp_pass" | sudo chpasswd
+            info "SFTP user password set"
+        fi
+    fi
 }
 
 setup_security_groups() {
     local wp_user=$1
     local php_user=$2
     local backup_user=$3
+    local sftp_user=$4
     
     # Create WordPress group for shared access
     if ! getent group wordpress &>/dev/null; then
@@ -107,11 +123,20 @@ setup_security_groups() {
     if ! getent group web &>/dev/null; then
         sudo groupadd web
     fi
+
+    # Create sftp-users group for SSH chroot matching
+    if ! getent group sftp-users &>/dev/null; then
+        sudo groupadd sftp-users
+    fi
     
     # Add users to appropriate groups
     sudo usermod -a -G wordpress "$wp_user"
     sudo usermod -a -G wordpress "$php_user"
-    sudo usermod -a -G wordpress "$backup_user"  # Read-only via permissions
+    sudo usermod -a -G wordpress "$backup_user"
+    if [ "$(load_state "ENABLE_SFTP")" = "true" ]; then
+        sudo usermod -a -G wordpress "$sftp_user"
+        sudo usermod -a -G sftp-users "$sftp_user"
+    fi
     
     # Add PHP user to web group (for nginx coordination)
     sudo usermod -a -G web "$php_user"
