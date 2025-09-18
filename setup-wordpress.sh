@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ===== CONFIGURATION =====
-SCRIPT_VERSION="3.0.4"
+SCRIPT_VERSION="3.1.0"
 SCRIPT_URL="https://raw.githubusercontent.com/ait88/VPS2/main/setup-wordpress.sh"
 BASE_URL="https://raw.githubusercontent.com/ait88/VPS2/main/wordpress-mgmt"
 
@@ -63,9 +63,9 @@ download_module() {
     local module_name=$1
     local module_path="$LIB_DIR/$module_name"
     local module_url="$BASE_URL/lib/$module_name"
-    
+
     debug "Downloading module: $module_name"
-    
+
     if command -v curl &> /dev/null; then
         curl -fsSL "$module_url" -o "$module_path" 2>/dev/null || {
             error "Failed to download module: $module_name"
@@ -75,7 +75,7 @@ download_module() {
         error "curl is required but not installed"
         return 1
     fi
-    
+
     chmod +x "$module_path"
     debug "Module downloaded: $module_path"
 }
@@ -83,18 +83,18 @@ download_module() {
 load_module() {
     local module_name=$1
     local module_path="$LIB_DIR/$module_name"
-    
+
     # Download if not exists or if update requested
     if [ ! -f "$module_path" ] || [ "${UPDATE_MODULES:-0}" = "1" ]; then
         download_module "$module_name" || return 1
     fi
-    
+
     # Source the module
     source "$module_path" || {
         error "Failed to load module: $module_name"
         return 1
     }
-    
+
     debug "Module loaded: $module_name"
 }
 
@@ -102,7 +102,7 @@ load_module() {
 MODULES=(
     "utils.sh"           # Common utilities
     "preflight.sh"       # System checks
-    "packages.sh"        # Install dependencies  
+    "packages.sh"        # Install dependencies
     "config.sh"          # Interactive configuration
     "users.sh"           # User management
     "database.sh"        # MariaDB setup
@@ -118,7 +118,7 @@ save_state() {
     local key=$1
     local value=$2
     touch "$STATE_FILE"
-    
+
     if grep -q "^${key}=" "$STATE_FILE" 2>/dev/null; then
         sed -i "s|^${key}=.*|${key}=${value}|" "$STATE_FILE"
     else
@@ -130,7 +130,7 @@ save_state() {
 load_state() {
     local key=$1
     local default=${2:-""}
-    
+
     if [ -f "$STATE_FILE" ]; then
         grep "^${key}=" "$STATE_FILE" 2>/dev/null | cut -d'=' -f2- || echo "$default"
     else
@@ -154,19 +154,19 @@ remove_state() {
 # ===== SELF-UPDATE =====
 check_update() {
     info "Checking for updates..."
-    
+
     local temp_script="/tmp/setup-wordpress-new.sh"
     curl -fsSL "$SCRIPT_URL" -o "$temp_script" 2>/dev/null || {
         warning "Failed to check for updates"
         return 1
     }
-    
+
     local latest_version=$(grep "^SCRIPT_VERSION=" "$temp_script" | head -1 | cut -d'"' -f2)
-    
+
     if [ -n "$latest_version" ] && [ "$latest_version" != "$SCRIPT_VERSION" ]; then
         echo -e "\033[1;33mNew version available: $latest_version (current: $SCRIPT_VERSION)\033[0m"
         read -p "Update now? [y/N]: " update_confirm
-        
+
         if [[ "$update_confirm" =~ ^[Yy]$ ]]; then
             cp "$0" "$0.backup-$(date +%Y%m%d-%H%M%S)"
             mv "$temp_script" "$0"
@@ -177,14 +177,14 @@ check_update() {
     else
         success "Running latest version ($SCRIPT_VERSION)"
     fi
-    
+
     rm -f "$temp_script"
 }
 
 # ===== INSTALLATION MODES =====
 mode_fresh_install() {
     info "=== Fresh WordPress Installation ==="
-    
+
     # Load and execute modules
     for module in "${MODULES[@]}"; do
         load_module "$module" || {
@@ -192,7 +192,7 @@ mode_fresh_install() {
             exit 1
         }
     done
-    
+
     # Execute installation steps
     run_preflight_checks
     install_packages
@@ -208,7 +208,7 @@ mode_fresh_install() {
     setup_ssl
     apply_security
     setup_backup_system
-    
+
     # Load security module if not already loaded
     if ! command -v show_completion_summary >/dev/null 2>&1; then
         load_module "security.sh" || {
@@ -216,47 +216,47 @@ mode_fresh_install() {
             exit 1
         }
     fi
-    
+
     success "WordPress installation completed successfully!"
     show_completion_summary
 }
 
 mode_import_site() {
     info "=== Import Existing WordPress Site ==="
-    
+
     # Load required modules
     for module in utils.sh preflight.sh config.sh users.sh database.sh packages.sh nginx.sh ssl.sh security.sh backup.sh wordpress.sh; do
         load_module "$module"
     done
-    
+
     # Run preflight checks to ensure dependencies are installed
     run_preflight_checks
-    
+
     import_wordpress_site
 }
 
 mode_restore_backup() {
     info "=== Restore from Backup ==="
-    
+
     for module in utils.sh preflight.sh config.sh users.sh database.sh packages.sh nginx.sh ssl.sh security.sh backup.sh wordpress.sh; do
         load_module "$module"
     done
-    
+
     # Run preflight checks to ensure dependencies are installed
     run_preflight_checks
-    
+
     restore_from_backup
 }
 
 # ===== NUKE ALL FUNCTION =====
 nuke_all() {
     info "=== Remove WordPress - Complete System Reset ==="
-    
+
     # Load required modules
     for module in utils.sh database.sh; do
         load_module "$module"
     done
-    
+
     echo
     echo -e "\033[1;31m⚠️  DANGER ZONE ⚠️\033[0m"
     echo "This will COMPLETELY REMOVE:"
@@ -270,7 +270,7 @@ nuke_all() {
     echo
     echo "Type 'I know what I'm doing, Nuke it all!' to proceed:"
     read -p "> " nuke_confirm
-    
+
     if [ "$nuke_confirm" = "I know what I'm doing, Nuke it all!" ]; then
         nuke_complete_system
     else
@@ -281,19 +281,19 @@ nuke_all() {
 
 nuke_complete_system() {
     info "🔥 NUKING complete WordPress system..."
-    
+
     # Backup current configuration for reference
     local domain=$(load_state "DOMAIN")
     local admin_email=$(load_state "ADMIN_EMAIL")
     local wp_root=$(load_state "WP_ROOT")
-    
+
     # Stop all services
     info "Stopping services..."
     sudo systemctl stop nginx 2>/dev/null || true
     sudo systemctl stop php8.2-fpm 2>/dev/null || true
     sudo systemctl stop redis-server 2>/dev/null || true
     sudo systemctl stop mariadb 2>/dev/null || true
-    
+
     # Remove MariaDB completely
     info "Removing MariaDB..."
     sudo systemctl stop mariadb || true
@@ -309,17 +309,17 @@ nuke_complete_system() {
     info "Clearing database state..."
     remove_state "DATABASE_CONFIGURED"
     remove_state "DB_ROOT_PASS"
-    
+
     # Remove WordPress files
     if [ -n "$wp_root" ] && [ -d "$wp_root" ]; then
         info "Removing WordPress files at $wp_root..."
         sudo rm -rf "$wp_root"
     fi
-    
+
     # Remove common WordPress directories
     sudo rm -rf /var/www/wordpress 2>/dev/null || true
     sudo rm -rf /var/www/html/wordpress 2>/dev/null || true
-    
+
     # Remove system users
     info "Removing system users..."
     for user in wp-user php-user wp-backup redis backup-user; do
@@ -334,7 +334,7 @@ nuke_complete_system() {
     sudo dpkg-statoverride --list | grep -E "(redis|mysql|php)" | while read perm owner group path; do
     sudo dpkg-statoverride --remove "$path" 2>/dev/null || true
     done
-    
+
     # Remove SSL certificates
     info "Removing SSL certificates..."
     if [ -n "$domain" ]; then
@@ -342,7 +342,7 @@ nuke_complete_system() {
         sudo rm -rf "/etc/letsencrypt/archive/$domain" 2>/dev/null || true
         sudo rm -rf "/etc/letsencrypt/renewal/$domain.conf" 2>/dev/null || true
     fi
-    
+
     # Remove Nginx configuration
     info "Removing Nginx configuration..."
     sudo rm -f /etc/nginx/sites-available/wordpress* 2>/dev/null || true
@@ -351,38 +351,38 @@ nuke_complete_system() {
         sudo rm -f "/etc/nginx/sites-available/$domain" 2>/dev/null || true
         sudo rm -f "/etc/nginx/sites-enabled/$domain" 2>/dev/null || true
     fi
-    
+
     # Remove PHP-FPM pools
     info "Removing PHP-FPM pools..."
     sudo rm -f /etc/php/8.2/fpm/pool.d/wordpress.conf 2>/dev/null || true
-    
+
     # Remove fail2ban jails
     info "Removing security configurations..."
     sudo rm -f /etc/fail2ban/jail.d/wordpress.conf 2>/dev/null || true
-    
+
     # Remove backup directories
     info "Removing backup directories..."
     sudo rm -rf /home/*/backups 2>/dev/null || true
     sudo rm -rf /home/*/db-backups 2>/dev/null || true
-    
+
     # Remove user credentials
     info "Removing user credentials..."
     rm -f "$HOME/.mysql_root"
     rm -f "$HOME/.my.cnf"
-    
+
     # Remove setup state completely
     info "Removing all configuration state..."
     rm -f "$STATE_FILE"
-    
+
     # Remove logs
     info "Removing logs..."
     rm -f "$LOG_FILE"
-    
+
     # Restart remaining services
     info "Restarting services..."
     sudo systemctl restart nginx 2>/dev/null || true
     sudo systemctl restart fail2ban 2>/dev/null || true
-    
+
     echo
     success "✓ Complete system nuke successful!"
     echo
@@ -396,9 +396,94 @@ nuke_complete_system() {
     info "🚀 System is now clean and ready for fresh WordPress installation"
     info "🚀 Run this script again to begin fresh setup"
     echo
-    
+
     exit 0
 }
+
+# ===== RESUME/RE-RUN FUNCTIONS (NEW) =====
+show_resume_menu() {
+    echo
+    echo -e "\033[1;32m=== Resume/Re-run Menu ===\033[0m"
+    echo
+    echo "1) Resume from last failed step"
+    echo "2) Re-run a specific setup step"
+    echo "3) Back to Main Menu"
+    echo
+    read -p "Enter your choice [1-3]: " choice
+    echo
+
+    case $choice in
+        1) resume_from_last_step ;;
+        2) rerun_specific_step ;;
+        3) show_menu ;;
+        *)
+            error "Invalid choice: $choice"
+            show_resume_menu
+            ;;
+    esac
+}
+
+resume_from_last_step() {
+    info "=== Resuming from last failed step ==="
+    if [ ! -f "$STATE_FILE" ]; then
+        error "No setup_state file found. Cannot resume."
+        return
+    fi
+    # Load all modules to ensure functions are available
+    for module in "${MODULES[@]}"; do
+        load_module "$module"
+    done
+    # complete_wordpress_setup is in wordpress.sh and contains state checks
+    complete_wordpress_setup
+}
+
+rerun_specific_step() {
+    echo
+    echo -e "\033[1;33m=== Re-run Specific Step ===\033[0m"
+    echo "This will clear the completion flag for a step and re-run it."
+    echo
+    echo "1) Re-install Packages"
+    echo "2) Re-configure Users"
+    echo "3) Re-configure Database"
+    echo "4) Re-configure Nginx"
+    echo "5) Re-configure SSL"
+    echo "6) Re-apply Security Hardening"
+    echo "7) Re-configure Backups"
+    echo "8) Back to Resume Menu"
+    echo
+    read -p "Enter your choice [1-8]: " choice
+    echo
+
+    # Load all modules first
+    for module in "${MODULES[@]}"; do
+        load_module "$module"
+    done
+
+    local step_chosen=false
+    case $choice in
+        1) remove_state "PACKAGES_INSTALLED"; install_packages; step_chosen=true ;;
+        2) remove_state "USERS_CONFIGURED"; setup_users; step_chosen=true ;;
+        3) remove_state "DATABASE_CONFIGURED"; setup_database; step_chosen=true ;;
+        4) remove_state "NGINX_CONFIGURED"; configure_nginx; step_chosen=true ;;
+        5) remove_state "SSL_CONFIGURED"; setup_ssl; step_chosen=true ;;
+        6) remove_state "SECURITY_CONFIGURED"; apply_security; step_chosen=true ;;
+        7) remove_state "BACKUP_CONFIGURED"; setup_backup_system; step_chosen=true ;;
+        8) show_resume_menu ;;
+        *)
+            error "Invalid choice: $choice"
+            rerun_specific_step
+            ;;
+    esac
+
+    if [ "$step_chosen" = true ]; then
+        if confirm "Continue with the rest of the setup from here?" Y; then
+            complete_wordpress_setup
+        else
+            show_resume_menu
+        fi
+    fi
+}
+
 
 # ===== MAIN MENU =====
 show_menu() {
@@ -407,25 +492,30 @@ show_menu() {
     echo
     echo "Installation Options:"
     echo "1) Fresh WordPress installation"
-    echo "2) Import existing WordPress site"  
+    echo "2) Import existing WordPress site"
     echo "3) Restore from backup"
-    echo "4) Update modules"
+    echo "4) Resume/Re-run Failed Setup"
     echo
-    echo "Management Menus:"
+    echo "Management & Updates:"
     echo "5) Utils Menu (Permissions, Domain Change, Nuke)"
     echo "6) Monitoring Menu"
     echo "7) Maintenance Menu"
+    echo "8) Update modules"
     echo
-    echo "8) Exit"
+    echo "9) Exit"
     echo
-    read -p "Enter your choice [1-8]: " choice
+    read -p "Enter your choice [1-9]: " choice
     echo
-    
+
     case $choice in
         1) mode_fresh_install ;;
         2) mode_import_site ;;
         3) mode_restore_backup ;;
-        4) 
+        4) show_resume_menu ;;
+        5) show_utils_menu ;;
+        6) show_monitoring_menu ;;
+        7) show_maintenance_menu ;;
+        8)
             UPDATE_MODULES=1
             info "Updating all modules..."
             for module in "${MODULES[@]}"; do
@@ -434,14 +524,11 @@ show_menu() {
             success "All modules updated"
             show_menu
             ;;
-        5) show_utils_menu ;;
-        6) show_monitoring_menu ;;
-        7) show_maintenance_menu ;;
-        8) 
+        9)
             info "Exiting..."
             exit 0
             ;;
-        *) 
+        *)
             error "Invalid choice: $choice"
             show_menu
             ;;
@@ -468,8 +555,8 @@ show_utils_menu() {
         2) change_primary_domain ;;
         3) nuke_all ;;
         4) test_ssh_import && show_utils_menu ;;
-        5) migrate_cron_jobs && show_utils_menu ;; 
-        6) show_menu ;;                           
+        5) migrate_cron_jobs && show_utils_menu ;;
+        6) show_menu ;;
         *)
             error "Invalid choice: $choice"
             show_utils_menu
@@ -494,10 +581,10 @@ show_monitoring_menu() {
     echo
     read -p "Enter your choice [1]: " choice
     echo
-    
+
     case $choice in
         1) show_menu ;;
-        *) 
+        *)
             error "Invalid choice: $choice"
             show_monitoring_menu
             ;;
@@ -522,10 +609,10 @@ show_maintenance_menu() {
     echo
     read -p "Enter your choice [1]: " choice
     echo
-    
+
     case $choice in
         1) show_menu ;;
-        *) 
+        *)
             error "Invalid choice: $choice"
             show_maintenance_menu
             ;;
@@ -536,12 +623,12 @@ show_maintenance_menu() {
 fix_permissions() {
     info "=== Fix/Enforce Standard Permissions ==="
     echo
-    
+
     # Load required modules
     for module in utils.sh; do
         load_module "$module"
     done
-    
+
     echo "This will apply the standardized permission model to your WordPress installation:"
     echo "• Base permissions: 644 files, 755 directories"
     echo "• WordPress files: wpuser:wordpress ownership"
@@ -549,7 +636,7 @@ fix_permissions() {
     echo "• Backup/log dirs: restricted access (2750)"
     echo "• Sensitive config: wp-config.php (640)"
     echo
-    
+
     if ! command -v confirm &>/dev/null; then
         echo -n "Apply standard permissions? [y/N]: "
         read -r response
@@ -564,13 +651,13 @@ fix_permissions() {
             return
         fi
     fi
-    
+
     if enforce_standard_permissions; then
         success "✓ Standard permissions applied successfully"
     else
         error "Failed to apply permissions"
     fi
-    
+
     echo
     echo "Press Enter to continue..."
     read
@@ -580,12 +667,12 @@ fix_permissions() {
 change_primary_domain() {
     info "=== Change Primary Domain ==="
     echo
-    
+
     # Load required modules
     for module in utils.sh config.sh nginx.sh ssl.sh wordpress.sh; do
         load_module "$module"
     done
-    
+
     local current_domain=$(load_state "DOMAIN")
     if [ -z "$current_domain" ]; then
         error "No current domain found in configuration"
@@ -594,12 +681,12 @@ change_primary_domain() {
         show_utils_menu
         return
     fi
-    
+
     echo "Current domain: $current_domain"
     echo
     echo "Enter new domain name (without www):"
     read -p "> " new_domain
-    
+
     if [ -z "$new_domain" ]; then
         error "Domain cannot be empty"
         echo "Press Enter to continue..."
@@ -607,7 +694,7 @@ change_primary_domain() {
         show_utils_menu
         return
     fi
-    
+
     if ! validate_domain "$new_domain"; then
         error "Invalid domain format"
         echo "Press Enter to continue..."
@@ -615,7 +702,7 @@ change_primary_domain() {
         show_utils_menu
         return
     fi
-    
+
     echo
     echo "This will update:"
     echo "• WordPress site URL and home URL"
@@ -626,7 +713,7 @@ change_primary_domain() {
     echo "From: $current_domain"
     echo "To:   $new_domain"
     echo
-    
+
     if ! command -v confirm &>/dev/null; then
         echo -n "Proceed with domain change? [y/N]: "
         read -r response
@@ -641,14 +728,14 @@ change_primary_domain() {
             return
         fi
     fi
-    
+
     if update_primary_domain "$current_domain" "$new_domain"; then
         success "✓ Domain changed successfully from $current_domain to $new_domain"
         save_state "DOMAIN" "$new_domain"
     else
         error "Failed to change domain"
     fi
-    
+
     echo
     echo "Press Enter to continue..."
     read
@@ -659,27 +746,27 @@ update_primary_domain() {
     local old_domain=$1
     local new_domain=$2
     local wp_root=$(load_state "WP_ROOT")
-    
+
     info "Updating domain from $old_domain to $new_domain..."
-    
+
     # Update WordPress URLs
     if [ -f "$wp_root/wp-config.php" ]; then
         info "Updating WordPress URLs..."
         sudo -u wpuser wp --path="$wp_root" option update home "https://$new_domain" 2>/dev/null || true
         sudo -u wpuser wp --path="$wp_root" option update siteurl "https://$new_domain" 2>/dev/null || true
     fi
-    
+
     # Update nginx configuration
     if [ -f "/etc/nginx/sites-available/$old_domain" ]; then
         info "Updating nginx configuration..."
         sudo sed -i "s/$old_domain/$new_domain/g" "/etc/nginx/sites-available/$old_domain"
         sudo mv "/etc/nginx/sites-available/$old_domain" "/etc/nginx/sites-available/$new_domain"
-        
+
         if [ -L "/etc/nginx/sites-enabled/$old_domain" ]; then
             sudo rm "/etc/nginx/sites-enabled/$old_domain"
             sudo ln -sf "/etc/nginx/sites-available/$new_domain" "/etc/nginx/sites-enabled/$new_domain"
         fi
-        
+
         # Test nginx configuration
         if sudo nginx -t; then
             sudo systemctl reload nginx
@@ -689,11 +776,11 @@ update_primary_domain() {
             return 1
         fi
     fi
-    
+
     # Update SSL certificates
     info "SSL certificates will need to be renewed for the new domain"
     info "Run: sudo certbot --nginx -d $new_domain -d www.$new_domain"
-    
+
     return 0
 }
 
@@ -776,7 +863,7 @@ migrate_cron_jobs() {
         # Parse the cron line into schedule and command
         local schedule=$(echo "$line" | cut -d' ' -f1-5)
         local cmd=$(echo "$line" | cut -d' ' -f6-)
-        
+
         # --- 1. Replace the path in the command ---
         local new_cmd=$(echo "$cmd" | sed "s|$remote_wp_dir|$local_wp_dir|g")
 
@@ -834,35 +921,35 @@ test_ssh_import() {
     echo "This will test SSH connectivity and WordPress discovery."
     echo "No files will be transferred or imported."
     echo
-    
+
     # Load required modules
     for module in utils.sh wordpress.sh; do
         load_module "$module"
     done
-    
+
     # Ensure sshpass is available
     ensure_sshpass || return 1
-    
+
     # Get SSH credentials
     get_ssh_credentials || return 1
-    
+
     # Test connection
     test_ssh_connection || return 1
-    
+
     # Discover WordPress sites
     local selected_wp_dir
     selected_wp_dir=$(discover_and_select_wordpress) || return 1
-    
+
     # Extract database credentials
     local db_creds
     db_creds=$(extract_remote_db_creds "$selected_wp_dir") || return 1
-    
+
     echo
     success "SSH import test completed successfully!"
     echo "Found WordPress at: $selected_wp_dir"
     echo "Database credentials extracted successfully"
     echo
-    
+
     if confirm "Show extracted credentials?" N; then
         echo "$db_creds"
     fi
@@ -889,7 +976,7 @@ main() {
                 echo "Usage: $0 [OPTIONS]"
                 echo "Options:"
                 echo "  --debug     Enable debug output"
-                echo "  --update    Force module updates"  
+                echo "  --update    Force module updates"
                 echo "  --fresh     Run fresh installation without menu"
                 echo "  --help      Show this help"
                 exit 0
@@ -900,16 +987,16 @@ main() {
                 ;;
         esac
     done
-    
+
     # Initialize logging
     touch "$LOG_FILE"
     info "WordPress Setup Script v${SCRIPT_VERSION} started"
-    
+
     # Check for updates unless disabled
     if [ "${SKIP_UPDATE:-0}" != "1" ]; then
         check_update "$@"
     fi
-    
+
     # Show menu
     show_menu
 }
