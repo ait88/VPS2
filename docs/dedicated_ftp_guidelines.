@@ -1,0 +1,62 @@
+
+## Secure SFTP Access for WordPress
+
+To provide file system access for developers or administrators without compromising the security of the standardized environment, a dedicated and restricted SFTP user is implemented. This approach maintains the principle of least privilege and service isolation by avoiding the use of the primary `wpuser` service account for interactive logins.
+
+### 1. Dedicated SFTP User (`wp-sftp`)
+
+A new, non-interactive user is created specifically for SFTP operations.
+
+Assuming default values, these may be different depending on environmental variables.  
+
+* **User**: `wp-sftp`
+* **Primary Group**: `sftp-users`
+* **Secondary Group**: `wordpress`
+* **Shell**: `/sbin/nologin` (No shell access permitted)
+
+This user is added to the `wordpress` group to gain the necessary read/write permissions on the WordPress files, consistent with the established security model.
+
+---
+
+### 2. SSH Chroot Jail for SFTP
+
+To strictly confine the user to the WordPress directory, a secure `chroot` environment is established.
+
+* **Jail Directory**: A `root`-owned directory is created at `/var/sftp/wp-sftp`. The SSH service requires the chroot directory and all its parents to be owned by `root` for security.
+* **Bind Mount**: The live WordPress directory (`/var/www/wordpress`) is securely exposed inside the jail using a bind mount to `/var/sftp/wp-sftp/html`. This is made permanent via an entry in `/etc/fstab`.
+* **SSH Configuration**: The `sshd_config` file is modified to enforce the following rules for any user in the `sftp-users` group:
+    * `ChrootDirectory /var/sftp/%u`: Locks the user into their specific, secure jail directory upon login.
+    * `ForceCommand internal-sftp`: Restricts the user to SFTP protocol only, disabling shell access.
+    * `PasswordAuthentication yes`: Enables password login specifically for this group.
+
+---
+
+### 3. WordPress File and Directory Permissions
+
+The permissions on the WordPress directory are set to facilitate group collaboration between the different service accounts.
+
+* **Permissions**: The `/var/www/wordpress` directory and its contents are set to `2775`.
+    * This grants write access to members of the `wordpress` group, including the `wp-sftp` user.
+    * The `setgid` bit (`2`) ensures that all new files and folders created within the directory automatically inherit the `wordpress` group ownership, maintaining permission consistency.
+
+---
+
+### 4. Automated Ownership Correction
+
+To ensure all files align with the standardized `wpuser:wordpress` ownership model, a watcher script automatically corrects the ownership of files uploaded via SFTP.
+
+* **Tool**: `inotify-tools` is installed to monitor filesystem events.
+* **Watcher Script**: A script located at `/usr/local/bin/sftp-chown-watcher.sh` runs continuously in the background.
+    * It watches for new files created in `/var/www/wordpress`.
+    * If it detects a new file owned by the `wp-sftp` user, it automatically changes the owner to `wpuser`.
+* **Systemd Service**: A `systemd` service (`sftp-watcher.service`) is created to ensure the watcher script starts on boot and runs persistently.
+
+This automation is crucial because it ensures that WordPress (running as `wpuser`) can always manage files uploaded via SFTP, preventing permission conflicts.
+
+---
+
+### 5. Firewall Configuration
+
+Access to the SFTP service is restricted at the network level using UFW.
+
+* **IP Whitelisting**: The firewall is configured to only allow connections on the SSH port from a specific list of whitelisted IP addresses. This provides a critical layer of security against unauthorized access attempts.
