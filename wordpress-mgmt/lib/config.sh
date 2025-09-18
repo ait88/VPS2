@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/config.sh - Interactive configuration gathering
-# Version: 3.0.1
+# Version: 3.0.2
 
 # Color definitions for consistent output
 RED='\033[0;31m'
@@ -93,6 +93,30 @@ configure_interactive() {
     
     # WAF/Proxy configuration
     configure_waf_proxy
+
+    # Dedicated SFTP User
+    if confirm "Enable dedicated SFTP user (wp-sftp)?" N; then
+        save_state "ENABLE_SFTP" "true"
+        info "SFTP user will be created with a chroot jail."
+
+        # SFTP Password
+        local sftp_pass=$(generate_password 16)
+        save_state "SFTP_PASS" "$sftp_pass"
+        echo -e "SFTP user password (generated): ${GREEN}$sftp_pass${NC}"
+        echo -e "${YELLOW}⚠ Save this password for your developer/admin${NC}"
+
+        # SFTP IP Whitelisting
+        local sftp_ips=()
+        info "Enter IP addresses to allow SFTP access (one per line, empty to finish):"
+        while true; do
+            read -p "IP/CIDR: " ip
+            [ -z "$ip" ] && break
+            sftp_ips+=("$ip")
+        done
+        save_state "SFTP_WHITELIST_IPS" "${sftp_ips[*]}"
+    else
+        save_state "ENABLE_SFTP" "false"
+    fi
     
     # Redis Cache
     if confirm "Enable Redis object cache?" Y; then
