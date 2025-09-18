@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/packages.sh - Fixed version with WP-CLI installation
-# Version: 3.0.1
+# Version: 3.0.2
 
 install_packages() {
     info "Installing required packages..."
@@ -99,6 +99,7 @@ install_optional_packages() {
         "php${php_version}-imagick"
         "php${php_version}-intl" "php${php_version}-bcmath"
         "redis-server"
+        "inotify-tools"
     )
     
     # Check if software-properties-common is already installed
