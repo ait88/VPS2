@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ===== CONFIGURATION =====
-SCRIPT_VERSION="3.1.0"
+SCRIPT_VERSION="3.1.1"
 SCRIPT_URL="https://raw.githubusercontent.com/ait88/VPS2/main/setup-wordpress.sh"
 BASE_URL="https://raw.githubusercontent.com/ait88/VPS2/main/wordpress-mgmt"
 
@@ -105,6 +105,7 @@ MODULES=(
     "packages.sh"        # Install dependencies
     "config.sh"          # Interactive configuration
     "users.sh"           # User management
+    "sftp.sh"            # SFTP user setup
     "database.sh"        # MariaDB setup
     "nginx.sh"           # Web server configuration
     "wordpress.sh"       # WordPress installation
@@ -207,6 +208,7 @@ mode_fresh_install() {
     }
     setup_ssl
     apply_security
+    setup_sftp_user
     setup_backup_system
 
     # Load security module if not already loaded
