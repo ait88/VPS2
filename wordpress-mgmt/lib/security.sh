@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/security.sh - Security hardening and fail2ban
-# Version: 3.0.1
+# Version: 3.0.2
 
 apply_security() {
     info "Applying security hardening..."
@@ -125,41 +125,34 @@ EOF
 
 configure_ufw() {
     info "Configuring firewall rules..."
-    
-    local waf_type=$(load_state "WAF_TYPE" "none")
-    local domain=$(load_state "DOMAIN")
-    
-    # Basic rules - preserve existing SSH, HTTP, and HTTPS rules
-    info "Configuring UFW with existing rule preservation..."
-    
-    # Save existing SSH rules (port 22) before reset
-    local ssh_rules_file="/tmp/ufw_ssh_rules.txt"
-    sudo ufw status numbered | grep ":22 " > "$ssh_rules_file" 2>/dev/null || true
-    
+
     # Only reset if this is a fresh setup (no critical rules exist)
     local existing_rules=$(sudo ufw status numbered | grep -E "80|443|22" | wc -l)
     if [ "$existing_rules" -eq 0 ]; then
-        debug "No existing rules found - performing fresh UFW setup"
+        debug "No existing critical rules found - performing fresh UFW setup"
         sudo ufw --force reset
     else
-        debug "Existing rules found - preserving SSH whitelist and SSL rules"
-        # Don't reset - preserve existing rules and add/update as needed
+        debug "Existing rules found - preserving them and adding new ones"
     fi
-    
+
     sudo ufw default deny incoming
     sudo ufw default allow outgoing
-    
-    # Restore SSH rules if they were saved and we did a reset
-    if [ -f "$ssh_rules_file" ] && [ -s "$ssh_rules_file" ]; then
-        info "Restoring SSH whitelist rules..."
-        while IFS= read -r rule; do
-            # Extract IP and restore rule
-            local ip=$(echo "$rule" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?')
-            if [ -n "$ip" ]; then
-                sudo ufw allow from "$ip" to any port 22 comment "SSH whitelist"
-            fi
-        done < "$ssh_rules_file"
-        rm -f "$ssh_rules_file"
+
+    # Add whitelisted IPs for SSH/SFTP access from the configuration
+    if [ "$(load_state "ENABLE_SFTP")" = "true" ]; then
+        local sftp_ips=$(load_state "SFTP_WHITELIST_IPS")
+        if [ -n "$sftp_ips" ]; then
+            info "Adding whitelisted IPs for SSH/SFTP access..."
+            for ip in $sftp_ips; do
+                # Add rule only if it doesn't already exist to avoid duplicates
+                if ! sudo ufw status | grep -q "from $ip to any port 22"; then
+                    sudo ufw allow from "$ip" to any port 22 proto tcp comment "SSH/SFTP Whitelist"
+                fi
+            done
+        else
+            warning "SFTP is enabled, but no whitelist IPs were provided in the configuration."
+            warning "SSH/SFTP access might be blocked unless rules ere added manually."
+        fi
     fi
     
     # Web traffic based on WAF
