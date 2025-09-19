@@ -242,12 +242,6 @@ create_virtual_host() {
     
     info "Creating Nginx virtual host..."
 
-    # Add hosts file entry for loopback connections
-    if ! grep -q "$domain" /etc/hosts; then
-        info "Adding hosts file entry to allow server to connect to itself..."
-        echo "127.0.0.1 $domain www.$domain" | sudo tee -a /etc/hosts
-    fi
-    
     # Server names - conditionally include www
     local server_names="$domain"
     [ "$include_www" = "true" ] && server_names="$domain www.$domain"
