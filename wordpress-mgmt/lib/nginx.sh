@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/nginx.sh - Nginx configuration with WAF support
-# Version: 3.0.0
+# Version: 3.0.1
 
 configure_nginx() {
     info "Configuring Nginx web server..."
@@ -313,6 +313,11 @@ $(generate_waf_restrictions "$waf_type")
     # Deny access to sensitive files
     location ~* /(?:uploads|files|wp-content|wp-includes)/.*\.php$ {
         deny all;
+    }
+
+    # Deny access to user.ini for WordFence - this sould be changed to an optional rule if WordFence isn't used
+    location ~ ^/\.user\.ini {
+    deny all;
     }
     
     # Deny access to dotfiles (but ACME challenges are handled in HTTP block)
