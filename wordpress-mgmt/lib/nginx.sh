@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/nginx.sh - Nginx configuration with WAF support
-# Version: 3.0.1
+# Version: 3.0.3
 
 configure_nginx() {
     info "Configuring Nginx web server..."
@@ -315,11 +315,6 @@ $(generate_waf_restrictions "$waf_type")
         deny all;
     }
 
-    # Deny access to user.ini for WordFence - this sould be changed to an optional rule if WordFence isn't used
-    location ~ ^/\.user\.ini {
-    deny all;
-    }
-    
     # Deny access to dotfiles (but ACME challenges are handled in HTTP block)
     location ~ /\. {
         deny all;
@@ -514,6 +509,19 @@ if ($query_string ~* "author=\d+") {
 
 # Rate limiting zones are defined in main nginx.conf http context
 EOF
+
+    # Conditionally add WordFence .user.ini rule
+    local plugins=$(load_state "WP_PLUGINS")
+    if [[ "$plugins" =~ "wordfence" ]]; then
+        info "WordFence detected, adding .user.ini Nginx rule..."
+        sudo tee -a /etc/nginx/snippets/wordpress-security.conf >/dev/null <<'EOF'
+
+# Deny access to user.ini for WordFence
+location ~ /\.user\.ini$ {
+    deny all;
+}
+EOF
+    fi
     
     # Add rate limiting to main nginx.conf if not exists
     if ! grep -q "limit_req_zone.*wordpress_login" /etc/nginx/nginx.conf; then
