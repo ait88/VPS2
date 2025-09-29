@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/config.sh - Interactive configuration gathering
-# Version: 3.0.2
+# Version: 3.0.3
 
 # Color definitions for consistent output
 RED='\033[0;31m'
@@ -177,6 +177,26 @@ configure_interactive() {
     local php_workers=$((CPU_CORES * 2))
     get_input "PHP-FPM workers" "$php_workers"
     save_state "PHP_WORKERS" "$INPUT_RESULT"
+
+        # Backup Configuration
+    echo
+    info "Backup Configuration"
+    echo "────────────────────"
+    
+    echo "How many recent backups to keep locally on VPS?"
+    echo "(Remote backup worker will archive older backups)"
+    echo
+    get_input "Local backup retention count [2-5]" "2"
+    local retention_input="$INPUT_RESULT"
+    
+    # Validate retention count
+    if [[ "$retention_input" =~ ^[2-5]$ ]]; then
+        save_state "BACKUP_RETENTION_COUNT" "$retention_input"
+        info "Will keep $retention_input most recent backups locally"
+    else
+        warning "Invalid retention count, using default: 2"
+        save_state "BACKUP_RETENTION_COUNT" "2"
+    fi
     
     # Installation Options
     echo
@@ -376,6 +396,8 @@ Admin Email: $(load_state "ADMIN_EMAIL")
 
 Database: $(load_state "DB_NAME")
 DB User: $(load_state "DB_USER")
+
+Backup Retention: $(load_state "BACKUP_RETENTION_COUNT" "2") local backups
 
 WAF Type: $(load_state "WAF_TYPE")
 SSL Type: $(load_state "SSL_TYPE")
