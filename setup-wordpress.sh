@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ===== CONFIGURATION =====
-SCRIPT_VERSION="3.1.1"
+SCRIPT_VERSION="3.1.2"
 SCRIPT_URL="https://raw.githubusercontent.com/ait88/VPS2/main/setup-wordpress.sh"
 BASE_URL="https://raw.githubusercontent.com/ait88/VPS2/main/wordpress-mgmt"
 
@@ -402,7 +402,7 @@ nuke_complete_system() {
     exit 0
 }
 
-# ===== RESUME/RE-RUN FUNCTIONS (NEW) =====
+# ===== RESUME/RE-RUN FUNCTIONS =====
 show_resume_menu() {
     echo
     echo -e "\033[1;32m=== Resume/Re-run Menu ===\033[0m"
@@ -544,21 +544,23 @@ show_utils_menu() {
     echo
     echo "1) Fix/Enforce Standard Permissions"
     echo "2) Change Primary Domain"
-    echo "3) Remove WordPress (Nuke System)"
-    echo "4) Test SSH Import Connectivity"
-    echo "5) Migrate Cron Jobs from Remote Server"
-    echo "6) Back to Main Menu"
+    echo "3) Backup Management (Pin, Retention, etc.)"
+    echo "4) Remove WordPress (Nuke System)"
+    echo "5) Test SSH Import Connectivity"
+    echo "6) Migrate Cron Jobs from Remote Server"
+    echo "7) Back to Main Menu"
     echo
-    read -p "Enter your choice [1-6]: " choice
+    read -p "Enter your choice [1-7]: " choice
     echo
 
     case $choice in
         1) fix_permissions ;;
         2) change_primary_domain ;;
-        3) nuke_all ;;
-        4) test_ssh_import && show_utils_menu ;;
-        5) migrate_cron_jobs && show_utils_menu ;;
-        6) show_menu ;;
+        3) show_backup_menu ;;
+        4) nuke_all ;;
+        5) test_ssh_import && show_utils_menu ;;
+        6) migrate_cron_jobs && show_utils_menu ;;
+        7) show_menu ;;
         *)
             error "Invalid choice: $choice"
             show_utils_menu
@@ -619,6 +621,247 @@ show_maintenance_menu() {
             show_maintenance_menu
             ;;
     esac
+}
+
+# ===== BACKUP MANAGEMENT MENU =====
+show_backup_menu() {
+    echo
+    echo -e "\033[1;32m=== Backup Management Menu ===\033[0m"
+    echo
+    echo "1) List all backups"
+    echo "2) Pin a backup (protect from deletion)"
+    echo "3) Unpin a backup"
+    echo "4) Show backup statistics"
+    echo "5) Update backup script (apply retention changes)"
+    echo "6) Back to Utils Menu"
+    echo
+    read -p "Enter your choice [1-6]: " choice
+    echo
+
+    case $choice in
+        1) list_backups ;;
+        2) pin_backup ;;
+        3) unpin_backup ;;
+        4) show_backup_stats ;;
+        5) update_backup_script ;;
+        6) show_utils_menu ;;
+        *)
+            error "Invalid choice: $choice"
+            show_backup_menu
+            ;;
+    esac
+}
+
+list_backups() {
+    info "=== Available Backups ==="
+    
+    local backup_user=$(load_state "BACKUP_USER" "wp-backup")
+    local backup_dirs=(
+        "/home/$backup_user/backups/daily"
+        "/home/$backup_user/backups/weekly"
+        "/home/$backup_user/backups/monthly"
+    )
+    
+    for dir in "${backup_dirs[@]}"; do
+        if [ -d "$dir" ]; then
+            local type=$(basename "$dir")
+            echo
+            echo "━━━ ${type^^} Backups ━━━"
+            
+            local backups=$(sudo -u "$backup_user" ls -1t "$dir"/*.tar.gz 2>/dev/null || true)
+            
+            if [ -z "$backups" ]; then
+                echo "  No backups found"
+                continue
+            fi
+            
+            echo "$backups" | while read -r backup; do
+                local basename=$(basename "$backup")
+                local size=$(sudo du -h "$backup" | cut -f1)
+                local date=$(sudo stat -c %y "$backup" | cut -d' ' -f1,2 | cut -d. -f1)
+                local pinned=""
+                
+                if [ -f "${backup}.pinned" ]; then
+                    pinned=" [PINNED]"
+                fi
+                
+                echo "  📦 $basename ($size)"
+                echo "     Created: $date$pinned"
+            done
+        fi
+    done
+    
+    echo
+    echo "Press Enter to continue..."
+    read
+    show_backup_menu
+}
+
+pin_backup() {
+    info "=== Pin a Backup ==="
+    
+    local backup_user=$(load_state "BACKUP_USER" "wp-backup")
+    
+    # Show available backups
+    echo
+    echo "Available backups:"
+    sudo -u "$backup_user" find /home/$backup_user/backups -name "*.tar.gz" -type f | \
+        grep -v ".pinned" | \
+        nl -w2 -s') '
+    
+    echo
+    read -p "Enter backup number to pin (or 0 to cancel): " selection
+    
+    if [ "$selection" = "0" ]; then
+        show_backup_menu
+        return
+    fi
+    
+    local backup_file=$(sudo -u "$backup_user" find /home/$backup_user/backups -name "*.tar.gz" -type f | \
+        grep -v ".pinned" | \
+        sed -n "${selection}p")
+    
+    if [ -z "$backup_file" ]; then
+        error "Invalid selection"
+    else
+        sudo -u "$backup_user" touch "${backup_file}.pinned"
+        success "Backup pinned: $(basename "$backup_file")"
+    fi
+    
+    echo
+    echo "Press Enter to continue..."
+    read
+    show_backup_menu
+}
+
+unpin_backup() {
+    info "=== Unpin a Backup ==="
+    
+    local backup_user=$(load_state "BACKUP_USER" "wp-backup")
+    
+    # Show pinned backups
+    echo
+    echo "Pinned backups:"
+    local pinned_files=$(sudo -u "$backup_user" find /home/$backup_user/backups -name "*.tar.gz.pinned" -type f)
+    
+    if [ -z "$pinned_files" ]; then
+        warning "No pinned backups found"
+        echo
+        echo "Press Enter to continue..."
+        read
+        show_backup_menu
+        return
+    fi
+    
+    echo "$pinned_files" | sed 's/.pinned$//' | nl -w2 -s') ' | sed 's|.*/||'
+    
+    echo
+    read -p "Enter backup number to unpin (or 0 to cancel): " selection
+    
+    if [ "$selection" = "0" ]; then
+        show_backup_menu
+        return
+    fi
+    
+    local pin_file=$(echo "$pinned_files" | sed -n "${selection}p")
+    
+    if [ -z "$pin_file" ]; then
+        error "Invalid selection"
+    else
+        sudo -u "$backup_user" rm -f "$pin_file"
+        success "Backup unpinned: $(basename "$pin_file" .pinned)"
+    fi
+    
+    echo
+    echo "Press Enter to continue..."
+    read
+    show_backup_menu
+}
+
+show_backup_stats() {
+    info "=== Backup Statistics ==="
+    
+    local backup_user=$(load_state "BACKUP_USER" "wp-backup")
+    local retention=$(load_state "BACKUP_RETENTION_COUNT" "2")
+    
+    echo
+    echo "Configuration:"
+    echo "  Retention Count: $retention backups"
+    echo
+    
+    for type in daily weekly monthly; do
+        local dir="/home/$backup_user/backups/$type"
+        if [ -d "$dir" ]; then
+            local total=$(sudo -u "$backup_user" ls -1 "$dir"/*.tar.gz 2>/dev/null | wc -l)
+            local pinned=$(sudo -u "$backup_user" ls -1 "$dir"/*.tar.gz.pinned 2>/dev/null | wc -l)
+            local size=$(sudo du -sh "$dir" 2>/dev/null | cut -f1)
+            
+            echo "${type^} backups:"
+            echo "  Total: $total ($pinned pinned)"
+            echo "  Size: $size"
+            echo
+        fi
+    done
+    
+    echo "Press Enter to continue..."
+    read
+    show_backup_menu
+}
+
+update_backup_script() {
+    info "=== Update Backup Script ==="
+    
+    # Load modules
+    for module in utils.sh backup.sh; do
+        load_module "$module"
+    done
+    
+    local backup_user=$(load_state "BACKUP_USER" "wp-backup")
+    local current_retention=$(load_state "BACKUP_RETENTION_COUNT" "2")
+    
+    echo
+    echo "Current retention: $current_retention backups"
+    echo
+    
+    if confirm "Update retention count?" N; then
+        get_input "New retention count [2-5]" "$current_retention"
+        local new_retention="$INPUT_RESULT"
+        
+        if [[ "$new_retention" =~ ^[2-5]$ ]]; then
+            save_state "BACKUP_RETENTION_COUNT" "$new_retention"
+            info "Retention updated to: $new_retention"
+        else
+            error "Invalid retention count (must be 2-5)"
+            show_backup_menu
+            return
+        fi
+    fi
+    
+    if confirm "Apply backup script updates to running system?" Y; then
+        info "Updating backup scripts..."
+        
+        # Update config file
+        sudo tee "/home/$backup_user/.backup_config" >/dev/null <<EOF
+# Backup configuration - Updated $(date)
+DOMAIN="$(load_state "DOMAIN")"
+WP_ROOT="$(load_state "WP_ROOT")"
+DB_NAME="$(load_state "DB_NAME")"
+BACKUP_USER="$backup_user"
+BACKUP_DIR="/home/$backup_user/backups"
+RETENTION_COUNT="$(load_state "BACKUP_RETENTION_COUNT")"
+EOF
+        
+        # Reinstall backup scripts
+        install_backup_scripts
+        
+        success "Backup scripts updated successfully"
+        info "Next scheduled backup will use new retention: $(load_state "BACKUP_RETENTION_COUNT")"
+    fi
+    
+    echo
+    echo "Press Enter to continue..."
+    read
+    show_backup_menu
 }
 
 # ===== UTILITY FUNCTIONS =====
