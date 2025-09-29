@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/backup.sh - Backup system configuration
-# Version: 3.0.8
+# Version: 3.0.9
 
 setup_backup_system() {
     info "Setting up backup system..."
@@ -62,8 +62,9 @@ install_backup_scripts() {
     local wp_root=$(load_state "WP_ROOT")
     local domain=$(load_state "DOMAIN")
     local db_name=$(load_state "DB_NAME")
+    local retention_count=$(load_state "BACKUP_RETENTION_COUNT" "2")
     
-    info "Installing backup scripts..."
+    info "Installing backup scripts with retention: $retention_count backups..."
     
     # Create configuration file first
     sudo tee "/home/$backup_user/.backup_config" >/dev/null <<EOF
@@ -73,6 +74,7 @@ WP_ROOT="$wp_root"
 DB_NAME="$db_name"
 BACKUP_USER="$backup_user"
 BACKUP_DIR="/home/$backup_user/db-backups"
+RETENTION_COUNT="$retention_count"
 EOF
     
     sudo chown "$backup_user:$backup_user" "/home/$backup_user/.backup_config"
@@ -118,25 +120,22 @@ log() {
 
 log "Starting WordPress backup for $DOMAIN"
 
-# Determine backup type
+# Determine backup type based on day
 DAY_OF_WEEK=$(date +%u)
 DAY_OF_MONTH=$(date +%d)
 
 if [ "$DAY_OF_MONTH" -eq 1 ]; then
     BACKUP_TYPE="monthly"
-    RETENTION_DAYS=180
 elif [ "$DAY_OF_WEEK" -eq 7 ]; then
     BACKUP_TYPE="weekly"
-    RETENTION_DAYS=30
 else
     BACKUP_TYPE="daily"
-    RETENTION_DAYS=7
 fi
 
 BACKUP_DIR="$BACKUP_BASE/$BACKUP_TYPE"
 BACKUP_NAME="${DOMAIN}_backup_${DATE}"
 
-# Use home directory for temp files to avoid /tmp space issues
+# Use home directory for temp files
 TEMP_BASE="$HOME/temp"
 mkdir -p "$TEMP_BASE"
 TEMP_DIR="$TEMP_BASE/$BACKUP_NAME"
@@ -154,7 +153,7 @@ mysqldump --defaults-file="$HOME/.my.cnf" \
     --databases "$DB_NAME" | gzip > "$TEMP_DIR/db.sql.gz"
 log "Database backup completed"
 
-# Direct copy - no sudo needed with group permissions
+# Copy configuration
 log "Copying configuration..."
 cp "$WP_ROOT/wp-config.php" "$TEMP_DIR/"
 log "Configuration copied"
@@ -183,14 +182,41 @@ sha256sum "${BACKUP_NAME}.tar.gz" > "${BACKUP_NAME}.tar.gz.sha256"
 
 rm -rf "$TEMP_DIR"
 
-# Cleanup old backups
-log "Cleaning old backups..."
-find "$BACKUP_DIR" -name "${DOMAIN}_backup_*.tar.gz" -mtime +$RETENTION_DAYS -delete
+# Cleanup old backups (respecting pins and retention count)
+log "Cleaning old backups (keeping $RETENTION_COUNT most recent + pinned)..."
+
+# Get all backups sorted by date (newest first)
+mapfile -t all_backups < <(ls -1t "${DOMAIN}_backup_"*.tar.gz 2>/dev/null || true)
+
+kept_count=0
+for backup_file in "${all_backups[@]}"; do
+    # Check if pinned
+    if [ -f "${backup_file}.pinned" ]; then
+        log "Keeping pinned backup: $backup_file"
+        continue
+    fi
+    
+    # Keep up to RETENTION_COUNT non-pinned backups
+    if [ $kept_count -lt $RETENTION_COUNT ]; then
+        log "Keeping recent backup ($((kept_count + 1))/$RETENTION_COUNT): $backup_file"
+        kept_count=$((kept_count + 1))
+    else
+        log "Removing old backup: $backup_file"
+        rm -f "$backup_file" "${backup_file}.sha256" 2>/dev/null || true
+    fi
+done
 
 BACKUP_SIZE=$(du -h "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" | cut -f1)
 log "Backup completed: ${BACKUP_NAME}.tar.gz ($BACKUP_SIZE)"
 
+# Create/update symlinks
 ln -sf "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" "$BACKUP_BASE/latest-${BACKUP_TYPE}.tar.gz"
+ln -sf "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" "$BACKUP_BASE/latest.tar.gz"
+
+# Summary
+total_backups=$(ls -1 "${DOMAIN}_backup_"*.tar.gz 2>/dev/null | wc -l)
+pinned_count=$(ls -1 "${DOMAIN}_backup_"*.tar.gz.pinned 2>/dev/null | wc -l)
+log "Total backups: $total_backups (${pinned_count} pinned, $kept_count regular)"
 
 exit 0
 EOF
