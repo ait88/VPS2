@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ===== CONFIGURATION =====
-SCRIPT_VERSION="3.1.2"
+SCRIPT_VERSION="3.1.3"
 SCRIPT_URL="https://raw.githubusercontent.com/ait88/VPS2/main/setup-wordpress.sh"
 BASE_URL="https://raw.githubusercontent.com/ait88/VPS2/main/wordpress-mgmt"
 
@@ -823,9 +823,10 @@ update_backup_script() {
     echo "Current retention: $current_retention backups"
     echo
     
-    if confirm "Update retention count?" N; then
-        get_input "New retention count [2-5]" "$current_retention"
-        local new_retention="$INPUT_RESULT"
+if confirm "Update retention count?" N; then
+    echo -n "New retention count [2-5] [$current_retention]: "
+    read -r new_retention
+    new_retention="${new_retention:-$current_retention}"
         
         if [[ "$new_retention" =~ ^[2-5]$ ]]; then
             save_state "BACKUP_RETENTION_COUNT" "$new_retention"
