@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/backup.sh - Backup system configuration
-# Version: 3.0.9
+# Version: 3.0.10
 
 setup_backup_system() {
     info "Setting up backup system..."
@@ -100,13 +100,25 @@ find "$BACKUP_DIR" -name "db_${DB_NAME}_*.sql.gz" -mtime +7 -delete
 echo "$BACKUP_FILE"
 EOF
     
-    # Main backup script - NO SUDO NEEDED VERSION
+    # Main backup script
     sudo tee "/home/$backup_user/backup-wordpress.sh" >/dev/null <<'EOF'
 #!/bin/bash
 set -euo pipefail
 
 source "$HOME/.backup_config"
 cd "$HOME"
+
+# Defensive check for RETENTION_COUNT
+if [ -z "${RETENTION_COUNT:-}" ]; then
+    echo "ERROR: RETENTION_COUNT not set in config, defaulting to 2" >&2
+    RETENTION_COUNT=2
+fi
+
+# Validate RETENTION_COUNT is a number
+if ! [[ "$RETENTION_COUNT" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: RETENTION_COUNT must be a number, defaulting to 2" >&2
+    RETENTION_COUNT=2
+fi
 
 DATE=$(date +%Y%m%d_%H%M%S)
 BACKUP_BASE="$HOME/backups"
@@ -119,6 +131,7 @@ log() {
 }
 
 log "Starting WordPress backup for $DOMAIN"
+log "Retention policy: Keep $RETENTION_COUNT most recent backups per type"
 
 # Determine backup type based on day
 DAY_OF_WEEK=$(date +%u)
@@ -183,28 +196,44 @@ sha256sum "${BACKUP_NAME}.tar.gz" > "${BACKUP_NAME}.tar.gz.sha256"
 rm -rf "$TEMP_DIR"
 
 # Cleanup old backups (respecting pins and retention count)
-log "Cleaning old backups (keeping $RETENTION_COUNT most recent + pinned)..."
+log "Cleaning old backups in $BACKUP_TYPE directory (keeping $RETENTION_COUNT most recent + pinned)..."
 
 # Get all backups sorted by date (newest first)
 mapfile -t all_backups < <(ls -1t "${DOMAIN}_backup_"*.tar.gz 2>/dev/null || true)
 
-kept_count=0
-for backup_file in "${all_backups[@]}"; do
-    # Check if pinned
-    if [ -f "${backup_file}.pinned" ]; then
-        log "Keeping pinned backup: $backup_file"
-        continue
-    fi
+if [ ${#all_backups[@]} -eq 0 ]; then
+    log "No existing backups found in this directory"
+else
+    log "Found ${#all_backups[@]} total backups in $BACKUP_TYPE directory"
     
-    # Keep up to RETENTION_COUNT non-pinned backups
-    if [ $kept_count -lt $RETENTION_COUNT ]; then
-        log "Keeping recent backup ($((kept_count + 1))/$RETENTION_COUNT): $backup_file"
-        kept_count=$((kept_count + 1))
-    else
-        log "Removing old backup: $backup_file"
-        rm -f "$backup_file" "${backup_file}.sha256" 2>/dev/null || true
-    fi
-done
+    kept_count=0
+    deleted_count=0
+    pinned_count=0
+    
+    for backup_file in "${all_backups[@]}"; do
+        # Check if pinned
+        if [ -f "${backup_file}.pinned" ]; then
+            log "Keeping pinned backup: $backup_file"
+            pinned_count=$((pinned_count + 1))
+            continue
+        fi
+        
+        # Keep up to RETENTION_COUNT non-pinned backups
+        if [ $kept_count -lt $RETENTION_COUNT ]; then
+            log "Keeping recent backup ($((kept_count + 1))/$RETENTION_COUNT): $backup_file"
+            kept_count=$((kept_count + 1))
+        else
+            log "Removing old backup: $backup_file"
+            if rm -f "$backup_file" "${backup_file}.sha256" 2>/dev/null; then
+                deleted_count=$((deleted_count + 1))
+            else
+                log "WARNING: Failed to delete $backup_file"
+            fi
+        fi
+    done
+    
+    log "Retention summary: kept $kept_count regular + $pinned_count pinned, deleted $deleted_count old backups"
+fi
 
 BACKUP_SIZE=$(du -h "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" | cut -f1)
 log "Backup completed: ${BACKUP_NAME}.tar.gz ($BACKUP_SIZE)"
@@ -213,10 +242,10 @@ log "Backup completed: ${BACKUP_NAME}.tar.gz ($BACKUP_SIZE)"
 ln -sf "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" "$BACKUP_BASE/latest-${BACKUP_TYPE}.tar.gz"
 ln -sf "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" "$BACKUP_BASE/latest.tar.gz"
 
-# Summary
+# Final summary
 total_backups=$(ls -1 "${DOMAIN}_backup_"*.tar.gz 2>/dev/null | wc -l)
-pinned_count=$(ls -1 "${DOMAIN}_backup_"*.tar.gz.pinned 2>/dev/null | wc -l)
-log "Total backups: $total_backups (${pinned_count} pinned, $kept_count regular)"
+pinned_total=$(ls -1 "${DOMAIN}_backup_"*.tar.gz.pinned 2>/dev/null | wc -l)
+log "Final count in $BACKUP_TYPE: $total_backups total backups ($pinned_total pinned)"
 
 exit 0
 EOF
