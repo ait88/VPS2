@@ -1,3 +1,22 @@
+##Current Project Goals.
+
+- Evaluate current goals and update GEMINI.md to keep track of tasks and actions performed.
+
+- Create new project DIR, eg. ~/VPS2
+(Important, the VPS2 project may assume it's located in ~/ this will need to be concidered.)
+
+- Connect to git repo - https://github.com/ait88/VPS2/
+(github token located in .env)
+
+- Carefully examin .gitignore, no private info is to be commited, the repository must only contain files and folders relevent to the 'VPS2 - WordPress & VPS Management Tools' repository.
+
+- Incorporate any relevent content of CLAUDE.md to this file(GEMINI.md) remove CLAUDE.md from the repository.
+
+- When making commits to the repository ensure that comments contain only required information, no fluff, abbreviations are ok.
+
+- Once this groundwork has been done we can then evaluate the current development of the VPS2 project.
+
+---
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -5,14 +24,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Common Commands
 
 ## User Notes
-- The goal of this project is to have the all the functionality and features of the standardised VPS, Wordpress, backup and monitoring environment be easily manage via the management scripts. 
+- The goal of this project is to have the all the functionality and features of the standardised VPS, Wordpress, backup and monitoring environment be easily manage via the management scripts.
 - When probems arise, the solution is to update the scripts to handle the problem, configurations that don't conform to the standard environment can be removed.
 - Check the flow of opperations, watch out for place holder files/operations that need fleshing out.
 - Periodically, suggest important notes or information that should be documented in this file or README.md
 - Don't forget to commit and push changes to the origin main repo
 
 ## Claude's Notes
-- I can add notes here for myself, Hi Claude! 
+- I can add notes here for myself, Hi Claude!
 
 ### Initial Setup
 ```bash
@@ -31,7 +50,7 @@ The main setup script now includes organized menus:
 
 **Installation Options (1-4):**
 - Fresh WordPress installation
-- Import existing WordPress site  
+- Import existing WordPress site
 - Restore from backup
 - Update modules
 
@@ -48,7 +67,7 @@ The main setup script now includes organized menus:
 
 # Available utils:
 # 1) Fix/Enforce Standard Permissions
-# 2) Change Primary Domain  
+# 2) Change Primary Domain
 # 3) Remove WordPress (Nuke System)
 ```
 
@@ -152,7 +171,7 @@ The system implements a standardized security permission model:
 
 ### User/Group Structure
 - **wpuser:wordpress** - WordPress file ownership and PHP-FPM access
-- **php-fpm:wordpress** - PHP execution with WordPress group access  
+- **php-fpm:wordpress** - PHP execution with WordPress group access
 - **www-data:wordpress** - Nginx web server read access
 - **wp-backup:wordpress** - Read-only backup access
 
