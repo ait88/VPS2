@@ -1,25 +1,49 @@
-##Current Project Goals.
+## Current Project Goals.
 
-- Evaluate current goals and update GEMINI.md to keep track of tasks and actions performed.
+- [x] Evaluate current goals and update GEMINI.md to keep track of tasks and actions performed.
+- [x] Create new project DIR, eg. ~/VPS2
+- [x] Connect to git repo - https://github.com/ait88/VPS2/
+- [x] Carefully examin .gitignore, no private info is to be commited, the repository must only contain files and folders relevent to the 'VPS2 - WordPress & VPS Management Tools' repository.
+- [x] Incorporate any relevent content of CLAUDE.md to this file(GEMINI.md) remove CLAUDE.md from the repository.
+- [x] When making commits to the repository ensure that comments contain only required information, no fluff, abbreviations are ok.
+- [x] Once this groundwork has been done we can then evaluate the current development of the VPS2 project.
 
-- Create new project DIR, eg. ~/VPS2
-(Important, the VPS2 project may assume it's located in ~/ this will need to be concidered.)
+## Progress
 
-- Connect to git repo - https://github.com/ait88/VPS2/
-(github token located in .env)
+### Initial Setup (Completed)
+- Created the `~/VPS2` directory.
+- Connected to the git repository `https://github.com/ait88/VPS2/`.
+- Examined the `.gitignore` file to ensure no private information is committed.
+- Merged the content of `CLAUDE.md` into `GEMINI.md` and removed `CLAUDE.md`.
+- Committed the changes with a concise commit message.
 
-- Carefully examin .gitignore, no private info is to be commited, the repository must only contain files and folders relevent to the 'VPS2 - WordPress & VPS Management Tools' repository.
+### Project Evaluation (Completed)
+- Performed a high-level evaluation of the project by reviewing the main scripts:
+  - `vps-setup.sh`: Initial server setup.
+  - `setup-wordpress.sh`: A comprehensive script for WordPress installation and management, with a modular architecture.
+  - `wp-security-audit.sh`: A script for auditing WordPress installations.
+- Performed a detailed evaluation of the project by reviewing all the library files in `wordpress-mgmt/lib/`:
+  - `utils.sh`: Common utility functions.
+  - `preflight.sh`: System preflight checks.
+  - `packages.sh`: Package installation.
+  - `config.sh`: Interactive configuration.
+  - `users.sh`: User management.
+  - `sftp.sh`: SFTP user setup.
+  - `database.sh`: Database setup.
+  - `nginx.sh`: Nginx configuration.
+  - `wordpress.sh`: WordPress installation and management.
+  - `ssl.sh`: SSL/TLS configuration.
+  - `security.sh`: Security hardening.
+  - `backup.sh`: Backup system configuration.
 
-- Incorporate any relevent content of CLAUDE.md to this file(GEMINI.md) remove CLAUDE.md from the repository.
-
-- When making commits to the repository ensure that comments contain only required information, no fluff, abbreviations are ok.
-
-- Once this groundwork has been done we can then evaluate the current development of the VPS2 project.
+## Next Steps
+- The initial setup and evaluation of the project are complete. The project is a well-structured and comprehensive set of scripts for automating the setup, management, and security of a WordPress VPS.
+- The next step is to discuss the future development of the project with the user.
 
 ---
-# CLAUDE.md
+# Project Documentation (from CLAUDE.md)
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance when working with code in this repository.
 
 ## Common Commands
 
