@@ -292,7 +292,7 @@ nuke_complete_system() {
     # Stop all services
     info "Stopping services..."
     sudo systemctl stop nginx 2>/dev/null || true
-    sudo systemctl stop php8.2-fpm 2>/dev/null || true
+    sudo systemctl stop "$(get_php_service)" 2>/dev/null || true
     sudo systemctl stop redis-server 2>/dev/null || true
     sudo systemctl stop mariadb 2>/dev/null || true
 
@@ -356,7 +356,9 @@ nuke_complete_system() {
 
     # Remove PHP-FPM pools
     info "Removing PHP-FPM pools..."
-    sudo rm -f /etc/php/8.2/fpm/pool.d/wordpress.conf 2>/dev/null || true
+    sudo rm -f "$(get_php_fpm_pool_dir)/wordpress.conf" 2>/dev/null || true
+    # Also clean up any other PHP versions to ensure complete cleanup
+    sudo rm -f /etc/php/*/fpm/pool.d/wordpress.conf 2>/dev/null || true
 
     # Remove fail2ban jails
     info "Removing security configurations..."

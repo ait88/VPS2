@@ -172,18 +172,43 @@ install_package_group() {
 detect_php_version() {
     # Check if PHP is already installed
     if command -v php &>/dev/null; then
-        php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;'
+        local installed_version=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')
+        echo "$installed_version"
         return
     fi
-    
-    # Otherwise, find the latest available version
-    local available_versions=$(apt-cache search --names-only '^php[0-9]+\.[0-9]+-fpm$' | 
-                               grep -oP 'php\K[0-9]+\.[0-9]+' | 
-                               sort -V | 
-                               tail -1)
-    
-    # Default to 8.2 if detection fails
-    echo "${available_versions:-8.2}"
+
+    # Get all available PHP versions from repository
+    local available_versions=$(apt-cache search --names-only '^php[0-9]+\.[0-9]+-fpm$' |
+                               grep -oP 'php\K[0-9]+\.[0-9]+' |
+                               sort -V -u)
+
+    # Prefer PHP 8.4, then 8.3, minimum 8.3
+    if echo "$available_versions" | grep -q '^8\.4$'; then
+        echo "8.4"
+    elif echo "$available_versions" | grep -q '^8\.3$'; then
+        echo "8.3"
+    else
+        # Get the latest available version
+        local latest=$(echo "$available_versions" | tail -1)
+
+        # Check if latest meets minimum requirement (8.3+)
+        if [ -n "$latest" ]; then
+            local major=$(echo "$latest" | cut -d. -f1)
+            local minor=$(echo "$latest" | cut -d. -f2)
+
+            if [ "$major" -gt 8 ] || ([ "$major" -eq 8 ] && [ "$minor" -ge 3 ]); then
+                echo "$latest"
+            else
+                error "No suitable PHP version found. Minimum required: 8.3, latest available: $latest"
+                error "Please add a repository with PHP 8.3+ (e.g., ondrej/php PPA)"
+                return 1
+            fi
+        else
+            error "No PHP packages found in repository"
+            error "Run: sudo add-apt-repository ppa:ondrej/php && sudo apt update"
+            return 1
+        fi
+    fi
 }
 
 install_wp_cli() {

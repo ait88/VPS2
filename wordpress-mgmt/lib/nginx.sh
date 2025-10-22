@@ -35,7 +35,7 @@ configure_nginx() {
 }
 
 setup_php_fpm_pool() {
-    local php_version=$(load_state "PHP_VERSION" "8.2")
+    local php_version=$(get_php_version)
     local php_user=$(load_state "PHP_USER" "php-fpm")
     local wp_user=$(load_state "WP_USER")
     local pool_name="${wp_user}_pool"
