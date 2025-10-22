@@ -46,6 +46,53 @@ validate_email() {
     [[ $email =~ $regex ]]
 }
 
+# ===== PHP VERSION HELPERS =====
+get_php_version() {
+    # Get PHP version from state, with fallback to detection
+    local php_version=$(load_state "PHP_VERSION" "")
+
+    if [ -z "$php_version" ]; then
+        # Try to detect from installed PHP
+        if command -v php &>/dev/null; then
+            php_version=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')
+        else
+            # Last resort: check for common PHP-FPM services
+            for ver in 8.4 8.3 8.2 8.1; do
+                if systemctl list-unit-files "php${ver}-fpm.service" &>/dev/null 2>&1; then
+                    php_version="$ver"
+                    break
+                fi
+            done
+        fi
+    fi
+
+    echo "${php_version:-8.3}"
+}
+
+get_php_service() {
+    # Get PHP-FPM service name
+    local php_version=$(get_php_version)
+    echo "php${php_version}-fpm"
+}
+
+get_php_fpm_pool_dir() {
+    # Get PHP-FPM pool.d directory path
+    local php_version=$(get_php_version)
+    echo "/etc/php/${php_version}/fpm/pool.d"
+}
+
+get_php_fpm_conf_dir() {
+    # Get PHP-FPM configuration directory
+    local php_version=$(get_php_version)
+    echo "/etc/php/${php_version}/fpm"
+}
+
+get_php_ini_path() {
+    # Get PHP INI file path for FPM
+    local php_version=$(get_php_version)
+    echo "/etc/php/${php_version}/fpm/php.ini"
+}
+
 # ===== USER INTERACTION =====
 # old confirm function changed due to error in cron import, leaving this here in case something breaks elsewhere.
 #confirm() {
