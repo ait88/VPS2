@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ===== CONFIGURATION =====
-SCRIPT_VERSION="3.1.3"
+SCRIPT_VERSION="3.1.4"
 SCRIPT_URL="https://raw.githubusercontent.com/ait88/VPS2/main/setup-wordpress.sh"
 BASE_URL="https://raw.githubusercontent.com/ait88/VPS2/main/wordpress-mgmt"
 
@@ -547,10 +547,11 @@ show_utils_menu() {
     echo "1) Fix/Enforce Standard Permissions"
     echo "2) Change Primary Domain"
     echo "3) Backup Management (Pin, Retention, etc.)"
-    echo "4) Remove WordPress (Nuke System)"
-    echo "5) Test SSH Import Connectivity"
-    echo "6) Migrate Cron Jobs from Remote Server"
-    echo "7) Back to Main Menu"
+    echo "4) PHP Version Management"
+    echo "5) Remove WordPress (Nuke System)"
+    echo "6) Test SSH Import Connectivity"
+    echo "7) Migrate Cron Jobs from Remote Server"
+    echo "8) Back to Main Menu"
     echo
     read -p "Enter your choice [1-7]: " choice
     echo
@@ -559,15 +560,68 @@ show_utils_menu() {
         1) fix_permissions ;;
         2) change_primary_domain ;;
         3) show_backup_menu ;;
-        4) nuke_all ;;
-        5) test_ssh_import && show_utils_menu ;;
-        6) migrate_cron_jobs && show_utils_menu ;;
-        7) show_menu ;;
+        4) manage_php_version ;;
+        5) nuke_all ;;
+        6) test_ssh_import && show_utils_menu ;;
+        7) migrate_cron_jobs && show_utils_menu ;;
+        8) show_menu ;;
         *)
             error "Invalid choice: $choice"
             show_utils_menu
             ;;
     esac
+}
+
+# ===== PHP VERSION MANAGEMENT =====
+manage_php_version() {
+    echo
+    echo -e "\033[1;36m=== PHP Version Management ===\033[0m"
+    echo
+    
+    # Load utils module
+    load_module "utils.sh"
+    
+    local current_version=$(get_php_version)
+    echo "Current PHP version: $current_version"
+    echo
+    
+    # Show available versions
+    echo "Available PHP versions:"
+    apt-cache search --names-only '^php[0-9]+\.[0-9]+-fpm$' | \
+        grep -oP 'php\K[0-9]+\.[0-9]+' | sort -V -u | nl -w2 -s') '
+    
+    echo
+    echo "1) Change PHP version"
+    echo "2) Show current PHP configuration"
+    echo "3) Back to Utils Menu"
+    echo
+    read -p "Enter your choice [1-3]: " choice
+    echo
+    
+    case $choice in
+        1)
+            read -p "Enter new PHP version (e.g., 8.4): " new_version
+            if [ -n "$new_version" ]; then
+                update_php_version "$new_version"
+            fi
+            ;;
+        2)
+            info "PHP Configuration:"
+            echo "  Version: $(php -v | head -1)"
+            echo "  FPM Socket: $(load_state "PHP_FPM_SOCKET")"
+            echo "  Service: php${current_version}-fpm"
+            echo "  Pool Config: /etc/php/${current_version}/fpm/pool.d/"
+            ;;
+        3)
+            show_utils_menu
+            return
+            ;;
+    esac
+    
+    echo
+    echo "Press Enter to continue..."
+    read
+    manage_php_version
 }
 
 # ===== MONITORING MENU =====
