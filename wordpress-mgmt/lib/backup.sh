@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/backup.sh - Backup system configuration
-# Version: 3.0.10
+# Version: 3.0.11
 
 setup_backup_system() {
     info "Setting up backup system..."
@@ -242,9 +242,9 @@ log "Backup completed: ${BACKUP_NAME}.tar.gz ($BACKUP_SIZE)"
 ln -sf "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" "$BACKUP_BASE/latest-${BACKUP_TYPE}.tar.gz"
 ln -sf "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" "$BACKUP_BASE/latest.tar.gz"
 
-# Final summary
-total_backups=$(ls -1 "${DOMAIN}_backup_"*.tar.gz 2>/dev/null | wc -l)
-pinned_total=$(ls -1 "${DOMAIN}_backup_"*.tar.gz.pinned 2>/dev/null | wc -l)
+# Final summary (using find instead of ls for reliability)
+total_backups=$(find . -maxdepth 1 -name "${DOMAIN}_backup_*.tar.gz" -type f | wc -l)
+pinned_total=$(find . -maxdepth 1 -name "${DOMAIN}_backup_*.tar.gz.pinned" -type f | wc -l)
 log "Final count in $BACKUP_TYPE: $total_backups total backups ($pinned_total pinned)"
 
 exit 0
