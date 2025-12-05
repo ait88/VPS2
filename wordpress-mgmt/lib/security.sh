@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/security.sh - Security hardening and fail2ban
-# Version: 3.0.5
+# Version: 3.0.6
 
 apply_security() {
     info "Applying security hardening..."
@@ -462,8 +462,18 @@ generate_security_report() {
         echo
         
         echo "== Fail2ban Status =="
-        sudo fail2ban-client status
-        echo
+        # Wait for fail2ban socket to be ready
+        local retries=0
+        while [ ! -S /var/run/fail2ban/fail2ban.sock ] && [ $retries -lt 10 ]; do
+            sleep 1
+            retries=$((retries + 1))
+        done
+        
+        if sudo fail2ban-client status 2>/dev/null; then
+            sudo fail2ban-client status
+        else
+            echo "fail2ban service starting (socket not ready yet)"
+        fi
         
         echo "== File Permissions =="
         ls -la "$wp_root/wp-config.php" 2>/dev/null || echo "wp-config.php not found"
