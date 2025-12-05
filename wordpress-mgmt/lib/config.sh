@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/config.sh - Interactive configuration gathering
-# Version: 3.0.3
+# Version: 3.0.4
 
 # Color definitions for consistent output
 RED='\033[0;31m'
@@ -273,6 +273,15 @@ configure_interactive() {
 
 configure_waf_proxy() {
     echo
+    echo "Is this server on a local network or behind an upstream proxy/WAF?"
+    echo "(e.g., Nginx Proxy Manager, Cloudflare Tunnel, etc.)"
+    
+    if confirm "Server is behind upstream proxy?" N; then
+        save_state "WAF_TYPE" "upstream_proxy"
+        info "Minimal nginx config will be used (upstream proxy handles SSL/routing)"
+        return
+    fi
+    
     PS3="Select WAF/Proxy configuration: "
     local waf_options=(
         "None - Direct Internet access"
