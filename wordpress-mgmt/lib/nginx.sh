@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/nginx.sh - Nginx configuration with WAF support
-# Version: 3.0.6
+# Version: 3.0.7
 
 get_nginx_version() {
     nginx -v 2>&1 | grep -oP 'nginx/\K[0-9]+\.[0-9]+\.[0-9]+'
@@ -43,7 +43,13 @@ configure_nginx() {
     
     show_progress 3 6 "Creating virtual host"
     ensure_temporary_ssl_certificates
-    create_virtual_host
+    
+    local waf_type=$(load_state "WAF_TYPE" "none")
+    if [ "$waf_type" = "upstream_proxy" ]; then
+        create_minimal_virtual_host
+    else
+        create_virtual_host
+    fi
     
     show_progress 4 6 "Setting up security headers"
     configure_security_headers
