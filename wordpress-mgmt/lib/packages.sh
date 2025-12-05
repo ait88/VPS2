@@ -1,6 +1,25 @@
 #!/bin/bash
 # wordpress-mgmt/lib/packages.sh - Fixed version with WP-CLI installation
-# Version: 3.0.2
+# Version: 3.0.3
+
+add_sury_php_repository() {
+    info "Adding Sury PHP repository for PHP 8.3+..."
+    
+    # Install prerequisites
+    sudo apt-get install -y lsb-release ca-certificates curl
+    
+    # Download and install Sury GPG key
+    sudo curl -sSL https://packages.sury.org/php/apt.gpg -o /etc/apt/trusted.gpg.d/php.gpg
+    
+    # Add repository
+    echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" | \
+        sudo tee /etc/apt/sources.list.d/php.list
+    
+    # Update package lists
+    sudo apt-get update -qq
+    
+    success "Sury PHP repository added"
+}
 
 install_packages() {
     info "Installing required packages..."
@@ -173,14 +192,47 @@ detect_php_version() {
     # Check if PHP is already installed
     if command -v php &>/dev/null; then
         local installed_version=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')
-        echo "$installed_version"
-        return
+        
+        # Check if installed version meets minimum requirement
+        local major=$(echo "$installed_version" | cut -d. -f1)
+        local minor=$(echo "$installed_version" | cut -d. -f2)
+        
+        if [ "$major" -gt 8 ] || ([ "$major" -eq 8 ] && [ "$minor" -ge 3 ]); then
+            echo "$installed_version"
+            return
+        else
+            warning "Installed PHP $installed_version does not meet minimum (8.3+)"
+            info "Will add Sury repository and upgrade PHP"
+        fi
     fi
 
     # Get all available PHP versions from repository
     local available_versions=$(apt-cache search --names-only '^php[0-9]+\.[0-9]+-fpm$' |
                                grep -oP 'php\K[0-9]+\.[0-9]+' |
                                sort -V -u)
+
+    # Check if 8.3+ is available
+    local has_suitable_version=false
+    while IFS= read -r ver; do
+        local major=$(echo "$ver" | cut -d. -f1)
+        local minor=$(echo "$ver" | cut -d. -f2)
+        
+        if [ "$major" -gt 8 ] || ([ "$major" -eq 8 ] && [ "$minor" -ge 3 ]); then
+            has_suitable_version=true
+            break
+        fi
+    done <<< "$available_versions"
+
+    # Add Sury repository if no suitable version found
+    if [ "$has_suitable_version" = false ]; then
+        warning "No PHP 8.3+ found in current repositories"
+        add_sury_php_repository
+        
+        # Refresh available versions
+        available_versions=$(apt-cache search --names-only '^php[0-9]+\.[0-9]+-fpm$' |
+                            grep -oP 'php\K[0-9]+\.[0-9]+' |
+                            sort -V -u)
+    fi
 
     # Prefer PHP 8.4, then 8.3, minimum 8.3
     if echo "$available_versions" | grep -q '^8\.4$'; then
@@ -200,12 +252,11 @@ detect_php_version() {
                 echo "$latest"
             else
                 error "No suitable PHP version found. Minimum required: 8.3, latest available: $latest"
-                error "Please add a repository with PHP 8.3+ (e.g., ondrej/php PPA)"
+                error "This should not happen after adding Sury repository"
                 return 1
             fi
         else
             error "No PHP packages found in repository"
-            error "Run: sudo add-apt-repository ppa:ondrej/php && sudo apt update"
             return 1
         fi
     fi
