@@ -85,6 +85,7 @@ configure_interactive() {
     save_state "DB_PASS" "$db_pass"
     echo -e "Database password (generated): ${GREEN}$db_pass${NC}"
     echo -e "${YELLOW}⚠ Save this password - it won't be shown again${NC}"
+    echo
     
     # Security Configuration
     echo
@@ -135,6 +136,7 @@ configure_interactive() {
     info "SSL Configuration"
     echo "────────────────────"
     
+    echo
     PS3="Select SSL configuration: "
     local ssl_options=(
         "Cloudflare Origin Certificate (Recommended for CF proxy)"
@@ -204,6 +206,7 @@ configure_interactive() {
     echo "────────────────────"
     
     # WordPress version
+    echo
     PS3="Select WordPress version: "
     local wp_versions=(
         "Latest stable"
@@ -269,6 +272,7 @@ configure_interactive() {
 }
 
 configure_waf_proxy() {
+    echo
     PS3="Select WAF/Proxy configuration: "
     local waf_options=(
         "None - Direct Internet access"
