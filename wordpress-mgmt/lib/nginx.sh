@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/nginx.sh - Nginx configuration with WAF support
-# Version: 3.0.3
+# Version: 3.0.4
 
 configure_nginx() {
     info "Configuring Nginx web server..."
@@ -98,6 +98,27 @@ php_admin_value[open_basedir] = $(load_state "WP_ROOT"):/tmp:/usr/share/php
 ; Session configuration
 php_admin_value[session.save_path] = /var/lib/php/sessions/$pool_name
 EOF
+
+    # Create version-agnostic symlink for PHP-FPM socket
+    local version_socket="/run/php/php${php_version}-fpm-$pool_name.sock"
+    local generic_socket="/run/php/php-fpm-$pool_name.sock"
+    
+    info "Creating version-agnostic PHP-FPM socket symlink..."
+    # Wait for PHP-FPM to create the socket
+    local retries=0
+    while [ ! -S "$version_socket" ] && [ $retries -lt 30 ]; do
+        sleep 1
+        retries=$((retries + 1))
+    done
+    
+    if [ -S "$version_socket" ]; then
+        sudo ln -sf "$version_socket" "$generic_socket"
+        save_state "PHP_FPM_SOCKET" "$generic_socket"
+        info "PHP-FPM socket symlink: $generic_socket -> $version_socket"
+    else
+        warning "PHP-FPM socket not created yet, will use versioned path"
+        save_state "PHP_FPM_SOCKET" "$version_socket"
+    fi
     
     # Create session directory
     sudo mkdir -p "/var/lib/php/sessions/$pool_name"
@@ -329,6 +350,7 @@ $(generate_waf_restrictions "$waf_type")
     location ~ \.php$ {
         try_files \$uri =404;
         fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        # Version-agnostic socket path (symlink managed by setup)
         fastcgi_pass unix:$php_socket;
         fastcgi_index index.php;
         include fastcgi_params;
