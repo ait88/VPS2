@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.18
+# Version: 3.0.19
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -317,7 +317,8 @@ finalize_wordpress_install() {
             --admin_user="admin" \
             --admin_password="$admin_pass" \
             --admin_email="$admin_email" \
-            --path="$wp_root"
+            --skip-email \
+            --path="$wp_root" 2>&1 | grep -v "sendmail\|getcwd"
         
         info "WordPress admin credentials:"
         info "  Username: admin"
