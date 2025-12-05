@@ -158,6 +158,7 @@ setup_backup_user() {
     echo "$backup_key" | sudo tee "$ssh_dir/authorized_keys" >/dev/null
     
     # Prompt for additional keys
+    echo
     while confirm "Add additional backup worker SSH key?" N; do
         echo
         read -p "Paste SSH public key: " extra_key
