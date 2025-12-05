@@ -95,7 +95,8 @@ extract_wordpress() {
     # Move files to destination
     sudo rsync -a wordpress/ "$wp_root/"
     
-    # Clean up
+    # Clean up (return to safe directory first)
+    cd "$wp_root"
     rm -rf "$temp_dir"
     
     debug "WordPress extracted to $wp_root"
