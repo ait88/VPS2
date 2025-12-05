@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/security.sh - Security hardening and fail2ban
-# Version: 3.0.2
+# Version: 3.0.3
 
 apply_security() {
     info "Applying security hardening..."
@@ -125,6 +125,8 @@ EOF
 
 configure_ufw() {
     info "Configuring firewall rules..."
+
+    local waf_type=$(load_state "WAF_TYPE" "none")
 
     # Only reset if this is a fresh setup (no critical rules exist)
     local existing_rules=$(sudo ufw status numbered | grep -E "80|443|22" | wc -l)
