@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/config.sh - Interactive configuration gathering
-# Version: 3.0.4
+# Version: 3.0.5
 
 # Color definitions for consistent output
 RED='\033[0;31m'
@@ -279,6 +279,17 @@ configure_waf_proxy() {
     if confirm "Server is behind upstream proxy?" N; then
         save_state "WAF_TYPE" "upstream_proxy"
         info "Minimal nginx config will be used (upstream proxy handles SSL/routing)"
+        
+        echo
+        if confirm "Restrict firewall to upstream proxy IP only? (recommended)" Y; then
+            read -p "Enter upstream proxy IP address: " proxy_ip
+            if [[ "$proxy_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+                save_state "UPSTREAM_PROXY_IP" "$proxy_ip"
+                info "Will restrict HTTP/HTTPS to $proxy_ip only"
+            else
+                warning "Invalid IP format - will allow all traffic"
+            fi
+        fi
         return
     fi
     
