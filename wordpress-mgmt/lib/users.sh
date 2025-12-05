@@ -61,6 +61,7 @@ create_system_users() {
     
     # WordPress user (owns WordPress files)
     if ! id "$wp_user" &>/dev/null; then
+        echo
         info "Creating WordPress user: $wp_user"
         sudo useradd -r -s /bin/bash -d "/home/$wp_user" -m "$wp_user"
         # Lock password - no direct login
@@ -69,6 +70,7 @@ create_system_users() {
     
     # PHP-FPM user (runs PHP processes)
     if ! id "$php_user" &>/dev/null; then
+        echo
         info "Creating PHP-FPM user: $php_user"
         sudo useradd -r -s /usr/sbin/nologin -d /nonexistent -M "$php_user"
         sudo passwd -l "$php_user"
@@ -76,6 +78,7 @@ create_system_users() {
     
     # Redis user (if not exists from package)
     if ! id "$redis_user" &>/dev/null; then
+        echo
         info "Creating Redis user: $redis_user"
         sudo useradd -r -s /usr/sbin/nologin -d /var/lib/redis -M "$redis_user"
         sudo passwd -l "$redis_user"
@@ -83,6 +86,7 @@ create_system_users() {
     
     # Backup user (read-only access)
     if ! id "$backup_user" &>/dev/null; then
+        echo
         info "Creating backup user: $backup_user"
         sudo useradd -r -s /bin/bash -d "/home/$backup_user" -m "$backup_user"
         sudo passwd -l "$backup_user"
@@ -90,6 +94,7 @@ create_system_users() {
     
     # Fix backup user home directory ownership (security fix)
     if [ -d "/home/$backup_user" ]; then
+        echo
         sudo chown -R "$backup_user:$backup_user" "/home/$backup_user"
         sudo chmod 750 "/home/$backup_user"
         debug "Fixed backup user home directory ownership"
@@ -98,6 +103,7 @@ create_system_users() {
     # SFTP user (for file uploads, chrooted)
     if [ "$(load_state "ENABLE_SFTP")" = "true" ]; then
         if ! id "$sftp_user" &>/dev/null; then
+            echo
             info "Creating SFTP user: $sftp_user"
             sudo useradd -s /sbin/nologin -d "/var/sftp/$sftp_user" -M "$sftp_user"
             # Set a password for the SFTP user
