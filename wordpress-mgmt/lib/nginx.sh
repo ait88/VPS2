@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/nginx.sh - Nginx configuration with WAF support
-# Version: 3.0.5
+# Version: 3.0.6
 
 get_nginx_version() {
     nginx -v 2>&1 | grep -oP 'nginx/\K[0-9]+\.[0-9]+\.[0-9]+'
@@ -276,6 +276,83 @@ ensure_temporary_ssl_certificates() {
     sudo chmod 644 "$cert_path"
     
     debug "Temporary SSL certificates created (valid for 1 day)"
+}
+
+create_minimal_virtual_host() {
+    local domain=$(load_state "DOMAIN")
+    local wp_root=$(load_state "WP_ROOT")
+    local php_socket=$(load_state "PHP_FPM_SOCKET")
+    
+    info "Creating minimal Nginx configuration (upstream proxy mode)..."
+    
+    sudo tee "/etc/nginx/sites-available/$domain" >/dev/null <<EOF
+# WordPress Nginx Configuration (Upstream Proxy Mode)
+# Domain: $domain
+# Upstream proxy handles SSL/domain routing
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $domain _;
+    
+    root $wp_root;
+    index index.php index.html;
+    
+    # Logging
+    access_log /var/log/nginx/${domain}_access.log;
+    error_log /var/log/nginx/${domain}_error.log;
+    
+    # Security headers
+    include /etc/nginx/snippets/security-headers.conf;
+    
+    # WordPress specific rules
+    include /etc/nginx/snippets/wordpress-security.conf;
+    
+    # Static file handling
+    location ~* \.(jpg|jpeg|gif|png|webp|svg|css|js|ico|xml|woff|woff2|ttf|otf|eot)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+    
+    # Deny access to sensitive files
+    location ~* /(?:uploads|files|wp-content|wp-includes)/.*\.php$ {
+        deny all;
+    }
+
+    location ~ /\. {
+        deny all;
+    }
+    
+    # WordPress permalinks
+    location / {
+        try_files \$uri \$uri/ /index.php?\$args;
+    }
+    
+    # PHP handling
+    location ~ \.php$ {
+        try_files \$uri =404;
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass unix:$php_socket;
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        fastcgi_param PATH_INFO \$fastcgi_path_info;
+        
+        # Trust upstream proxy for HTTPS detection
+        fastcgi_param HTTPS \$http_x_forwarded_proto;
+        
+        # Performance
+        fastcgi_buffer_size 128k;
+        fastcgi_buffers 256 16k;
+        fastcgi_busy_buffers_size 256k;
+        fastcgi_temp_file_write_size 256k;
+        
+        # Security
+        fastcgi_param HTTP_PROXY "";
+    }
+}
+EOF
 }
 
 create_virtual_host() {
