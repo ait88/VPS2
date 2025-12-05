@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/utils.sh - Common utility functions
-# Version: 3.0.4
+# Version: 3.0.5
 
 # ===== SYSTEM CHECKS =====
 check_sudo() {
@@ -443,6 +443,85 @@ verify_wordpress_stack() {
         done
         echo
         error "WordPress may not function properly. Address these issues first."
+        return 1
+    fi
+}
+
+# ===== PHP VERSION MANAGEMENT =====
+update_php_version() {
+    local new_version=$1
+    local current_version=$(get_php_version)
+    
+    if [ -z "$new_version" ]; then
+        error "Usage: update_php_version <version>"
+        info "Example: update_php_version 8.4"
+        return 1
+    fi
+    
+    info "Updating PHP from $current_version to $new_version..."
+    
+    # Install new PHP version
+    local packages=(
+        "php${new_version}-fpm"
+        "php${new_version}-mysql"
+        "php${new_version}-xml"
+        "php${new_version}-curl"
+        "php${new_version}-mbstring"
+        "php${new_version}-gd"
+        "php${new_version}-zip"
+    )
+    
+    if ! sudo apt-get install -y "${packages[@]}"; then
+        error "Failed to install PHP $new_version"
+        return 1
+    fi
+    
+    # Update symlinks
+    local wp_user=$(load_state "WP_USER")
+    local pool_name="${wp_user}_pool"
+    local old_socket="/run/php/php${current_version}-fpm-${pool_name}.sock"
+    local new_socket="/run/php/php${new_version}-fpm-${pool_name}.sock"
+    local generic_socket="/run/php/php-fpm-${pool_name}.sock"
+    
+    # Copy pool configuration to new version
+    if [ -f "/etc/php/${current_version}/fpm/pool.d/${pool_name}.conf" ]; then
+        sudo cp "/etc/php/${current_version}/fpm/pool.d/${pool_name}.conf" \
+                "/etc/php/${new_version}/fpm/pool.d/${pool_name}.conf"
+        
+        # Update version-specific paths in pool config
+        sudo sed -i "s/php${current_version}/php${new_version}/g" \
+            "/etc/php/${new_version}/fpm/pool.d/${pool_name}.conf"
+    fi
+    
+    # Start new PHP-FPM
+    sudo systemctl enable "php${new_version}-fpm"
+    sudo systemctl start "php${new_version}-fpm"
+    
+    # Wait for new socket
+    local retries=0
+    while [ ! -S "$new_socket" ] && [ $retries -lt 30 ]; do
+        sleep 1
+        retries=$((retries + 1))
+    done
+    
+    if [ -S "$new_socket" ]; then
+        # Update symlink
+        sudo ln -sf "$new_socket" "$generic_socket"
+        
+        # Update state
+        save_state "PHP_VERSION" "$new_version"
+        
+        # Restart nginx
+        sudo systemctl restart nginx
+        
+        # Stop old PHP-FPM
+        sudo systemctl stop "php${current_version}-fpm"
+        sudo systemctl disable "php${current_version}-fpm"
+        
+        success "PHP updated from $current_version to $new_version"
+        info "Symlink updated: $generic_socket -> $new_socket"
+    else
+        error "New PHP-FPM socket not created"
         return 1
     fi
 }
