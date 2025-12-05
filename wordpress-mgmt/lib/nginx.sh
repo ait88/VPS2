@@ -1,6 +1,30 @@
 #!/bin/bash
 # wordpress-mgmt/lib/nginx.sh - Nginx configuration with WAF support
-# Version: 3.0.4
+# Version: 3.0.5
+
+get_nginx_version() {
+    nginx -v 2>&1 | grep -oP 'nginx/\K[0-9]+\.[0-9]+\.[0-9]+'
+}
+
+compare_versions() {
+    # Compare two version strings (returns 0 if v1 >= v2)
+    local v1=$1
+    local v2=$2
+    
+    printf '%s\n%s\n' "$v2" "$v1" | sort -V -C
+}
+
+get_http2_directive() {
+    # Nginx 1.25.1+ uses 'http2 on;' on separate line
+    # Older versions use 'listen 443 ssl http2;'
+    local nginx_version=$(get_nginx_version)
+    
+    if compare_versions "$nginx_version" "1.25.1"; then
+        echo "separate"
+    else
+        echo "inline"
+    fi
+}
 
 configure_nginx() {
     info "Configuring Nginx web server..."
@@ -297,11 +321,26 @@ $(generate_waf_restrictions_http "$waf_type")
     }
 }
 
-# HTTPS Server Block - Main WordPress configuration  
+# HTTPS Server Block - Main WordPress configuration
 server {
+EOF
+
+    # Handle HTTP/2 based on nginx version
+    local http2_style=$(get_http2_directive)
+    if [ "$http2_style" = "separate" ]; then
+        cat >> "/etc/nginx/sites-available/$domain" <<'EOF'
     listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
+EOF
+    else
+        cat >> "/etc/nginx/sites-available/$domain" <<'EOF'
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+EOF
+    fi
+    
+    cat >> "/etc/nginx/sites-available/$domain" <<EOF
     server_name $server_names;
     
     root $wp_root;
