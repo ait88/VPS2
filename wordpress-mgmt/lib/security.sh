@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/security.sh - Security hardening and fail2ban
-# Version: 3.0.4
+# Version: 3.0.5
 
 apply_security() {
     info "Applying security hardening..."
@@ -158,18 +158,25 @@ configure_ufw() {
     fi
     
     # Web traffic based on WAF
-    if [ "$waf_type" = "none" ] || [ "$waf_type" = "upstream_proxy" ]; then
-        # Direct access or upstream proxy - allow HTTP/HTTPS
+    if [ "$waf_type" = "none" ]; then
+        # Direct access - allow all
         if ! sudo ufw status | grep -q "80/tcp"; then
             sudo ufw allow 80/tcp comment "HTTP"
         fi
         if ! sudo ufw status | grep -q "443/tcp"; then
             sudo ufw allow 443/tcp comment "HTTPS"
         fi
+    elif [ "$waf_type" = "upstream_proxy" ]; then
+        # Upstream proxy mode
+        local upstream_ip=$(load_state "UPSTREAM_PROXY_IP" "")
         
-        if [ "$waf_type" = "upstream_proxy" ]; then
-            info "Upstream proxy mode - local nginx allows all traffic"
-            info "Ensure your upstream proxy (NPM) handles access control"
+        if [ -n "$upstream_ip" ]; then
+            info "Restricting HTTP/HTTPS to upstream proxy: $upstream_ip"
+            sudo ufw allow from "$upstream_ip" to any port 80,443 proto tcp comment "Upstream Proxy"
+        else
+            info "Allowing all HTTP/HTTPS (upstream proxy handles filtering)"
+            sudo ufw allow 80/tcp comment "HTTP"
+            sudo ufw allow 443/tcp comment "HTTPS"
         fi
     else
         # WAF restricted access - REMOVE any general allow rules
