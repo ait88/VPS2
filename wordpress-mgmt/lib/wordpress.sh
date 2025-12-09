@@ -1,6 +1,6 @@
 #!/bin/bash
 # wordpress-mgmt/lib/wordpress.sh - WordPress installation and management
-# Version: 3.0.19
+# Version: 3.0.20
 
 install_wordpress() {
     info "Installing WordPress..."
@@ -218,6 +218,34 @@ require_once ABSPATH . 'wp-settings.php';
 EOF
     
     debug "WordPress configuration created"
+    configure_wordpress_loopback
+}
+
+configure_wordpress_loopback() {
+    local wp_root=$(load_state "WP_ROOT")
+    local domain=$(load_state "DOMAIN")
+    local wp_config="$wp_root/wp-config.php"
+    
+    info "Configuring WordPress loopback and REST API..."
+    
+    if [ ! -f "$wp_config" ]; then
+        warning "wp-config.php not found, skipping loopback configuration"
+        return 1
+    fi
+    
+    if grep -q "WP_HTTP_BLOCK_EXTERNAL" "$wp_config" 2>/dev/null; then
+        debug "HTTP configuration already present"
+        return 0
+    fi
+    
+    sudo sed -i "/require_once.*ABSPATH.*wp-settings.php/i\\
+\\
+/* Allow loopback requests for REST API, cron, and auto-updates */\\
+define('WP_HTTP_BLOCK_EXTERNAL', true);\\
+define('WP_ACCESSIBLE_HOSTS', 'localhost,127.0.0.1,*.wordpress.org,*.w.org,$domain');\\
+" "$wp_config"
+    
+    info "Loopback configuration added to wp-config.php"
 }
 
 set_wordpress_permissions() {
