@@ -535,13 +535,7 @@ Before committing changes, verify:
 
 **GitHub Repository:** wordpress-mgmt scripts (auto-downloaded from GitHub)
 
-**Maintainer:** Alexandrina IT (Paul)
-
-**Client Deployments:**
-- TSBC (tsbcbackup user)
-- Allinone (allinonesabackup user)
-- MAPRAK
-- Multiple other production sites
+**Maintainer:** ait88
 
 **Development Branch:** `claude/create-agents-documentation-01VR9Wbd46MVMe8DiXeemaoB`
 
