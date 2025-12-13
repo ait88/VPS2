@@ -15,7 +15,8 @@ setup_ssl() {
     
     local ssl_type=$(load_state "SSL_TYPE" "letsencrypt")
     local domain=$(load_state "DOMAIN")
-    
+    local waf_type=$(load_state "WAF_TYPE" "none")
+
     case "$ssl_type" in
         "cloudflare_origin")
             setup_cloudflare_origin_ssl "$domain"
