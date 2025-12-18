@@ -661,13 +661,107 @@ import_from_extracted_directory() {
     
     save_state "WORDPRESS_INSTALLED" "true"
     save_state "WP_INSTALL_METHOD" "import"
-    
+
     success "WordPress site imported successfully from directory"
+}
+
+get_stream_cache_path() {
+    local domain=$(load_state "DOMAIN" "wordpress-site")
+    local sanitized_domain=${domain//[^A-Za-z0-9._-]/_}
+    local cache_dir="$(get_user_home)/.cache/wordpress-mgmt"
+
+    mkdir -p "$cache_dir"
+
+    echo "$cache_dir/${sanitized_domain}_ssh_stream.tar.gz"
+}
+
+stream_database_with_retries() {
+    local local_db_user=$1
+    local local_db_pass=$2
+    local local_db_name=$3
+    local attempts=${4:-3}
+    local delay=${5:-5}
+
+    for attempt in $(seq 1 "$attempts"); do
+        info "Streaming database directly (attempt $attempt/$attempts)..."
+
+        if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "mysqldump -h'$REMOTE_DB_HOST' -u'$REMOTE_DB_USER' -p'$REMOTE_DB_PASS' '$REMOTE_DB_NAME'" | \
+            mysql -u"$local_db_user" -p"$local_db_pass" "$local_db_name"; then
+            success "Database streamed successfully"
+            return 0
+        fi
+
+        warning "Database streaming attempt $attempt failed"
+
+        if [ "$attempt" -lt "$attempts" ]; then
+            info "Retrying in ${delay}s..."
+            sleep "$delay"
+        fi
+    done
+
+    error "Database streaming failed after $attempts attempts"
+    return 1
+}
+
+stream_wordpress_files_with_cache() {
+    local selected_wp_dir=$1
+    local tar_includes=$2
+    local wp_root=$3
+    local attempts=${4:-3}
+    local delay=${5:-5}
+    local cache_path
+    cache_path=$(get_stream_cache_path)
+
+    info "WordPress files will be cached locally at: $cache_path"
+
+    local use_cache=0
+    if [ -f "$cache_path" ]; then
+        info "Found cached archive from previous run: $cache_path"
+        if confirm "Use cached archive instead of re-streaming from remote?" Y; then
+            use_cache=1
+        else
+            rm -f "$cache_path"
+        fi
+    fi
+
+    for attempt in $(seq 1 "$attempts"); do
+        info "Streaming WordPress files (attempt $attempt/$attempts)..."
+
+        if [ "$use_cache" -eq 1 ]; then
+            if sudo tar -xzf "$cache_path" -C "$wp_root"; then
+                success "WordPress files restored from cached archive"
+                return 0
+            fi
+
+            warning "Cached archive extraction failed, will re-stream from remote"
+            use_cache=0
+        fi
+
+        if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "cd '$selected_wp_dir' && tar -czf - --ignore-failed-read --warning=no-file-changed --exclude='wp-content/cache' --exclude='wp-content/wflogs' --exclude='wp-content/backup*' $tar_includes" | \
+            tee "$cache_path" | sudo tar -xzf - -C "$wp_root"; then
+            success "WordPress files streamed successfully"
+            info "Stream cached locally for resume: $cache_path"
+            return 0
+        fi
+
+        warning "WordPress file streaming failed on attempt $attempt"
+        rm -f "$cache_path"
+
+        if [ "$attempt" -lt "$attempts" ]; then
+            info "Retrying in ${delay}s..."
+            sleep "$delay"
+        fi
+    done
+
+    error "WordPress file streaming failed after $attempts attempts"
+    return 1
 }
 
 import_via_ssh_stream() {
     info "=== Direct SSH streaming import (no temp files) ==="
-    
+
     # Ensure sshpass is available  
     ensure_sshpass || return 1
     
@@ -686,23 +780,18 @@ import_via_ssh_stream() {
     local db_creds
     db_creds=$(extract_remote_db_creds "$selected_wp_dir") || return 1
     confirm_database_settings "$db_creds" || return 1
-    
+
     local wp_root=$(load_state "WP_ROOT")
     local wp_user=$(load_state "WP_USER")
-    
+    local local_db_user=$(load_state "DB_USER")
+    local local_db_pass=$(load_state "DB_PASS")
+    local local_db_name=$(load_state "DB_NAME")
+
     info "Starting direct streaming import..."
-    
-    # 1. Stream database directly (no temp files)
-    info "Streaming database directly..."
-    if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
-        "mysqldump -h'$REMOTE_DB_HOST' -u'$REMOTE_DB_USER' -p'$REMOTE_DB_PASS' '$REMOTE_DB_NAME'" | \
-        mysql -u"$(load_state "DB_USER")" -p"$(load_state "DB_PASS")" "$(load_state "DB_NAME")"; then
-        success "Database streamed successfully"
-    else
-        error "Database streaming failed"
-        return 1
-    fi
-    
+
+    # 1. Stream database directly with retries
+    stream_database_with_retries "$local_db_user" "$local_db_pass" "$local_db_name" || return 1
+
     # 2. Stream WordPress files directly (no temp files on either server)
     info "Streaming WordPress files..."
     
@@ -711,18 +800,11 @@ import_via_ssh_stream() {
     if [ -n "$REMOTE_ADDITIONAL_FOLDERS" ]; then
         tar_includes="$tar_includes $REMOTE_ADDITIONAL_FOLDERS"
     fi
-    
+
     # Create WordPress root and stream tar directly into it
     sudo mkdir -p "$wp_root"
-    
-    if sshpass -p "$SSH_PASS" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
-        "cd '$selected_wp_dir' && tar -czf - --exclude='wp-content/cache' --exclude='wp-content/wflogs' --exclude='wp-content/backup*' $tar_includes" | \
-        sudo tar -xzf - -C "$wp_root"; then
-        success "WordPress files streamed successfully"
-    else
-        error "WordPress file streaming failed"
-        return 1
-    fi
+
+    stream_wordpress_files_with_cache "$selected_wp_dir" "$tar_includes" "$wp_root" || return 1
     
     # 3. Ensure WordPress core files are present
     ensure_wordpress_core
