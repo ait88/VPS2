@@ -6,7 +6,7 @@ This is an **enterprise-grade WordPress VPS management system** that automates t
 
 **Primary Purpose:** Standardized, secure, automated WordPress environment deployment with multi-server support, backup management, security hardening, and site migration capabilities.
 
-**Current Version:** 3.1.4 (self-updating from GitHub)
+**Current Version:** 3.1.5 (self-updating from GitHub)
 
 **Target Environment:** Ubuntu 20.04+ / Debian 11+
 
@@ -227,9 +227,70 @@ backups/
 - `ssl.sh` - Cloudflare Origin CA certificate handling
 
 **When behind WAF:**
-- Use appropriate SSL type (Cloudflare Origin CA for Cloudflare)
+- Use appropriate SSL type (Let's Encrypt recommended, Cloudflare Origin CA supported)
 - Configure nginx for real IP detection
 - Adjust fail2ban actions (firewall-cmd vs direct iptables)
+
+### 8. Default Configuration (Cloudflare + Let's Encrypt)
+
+**Recommended Production Setup:** Cloudflare Proxy with Let's Encrypt SSL
+
+When Cloudflare proxy is selected, the following hardening is automatically applied:
+
+#### nginx Configuration
+| Feature | Configuration File | Purpose |
+|---------|-------------------|---------|
+| Real IP Detection | `/etc/nginx/conf.d/cloudflare-realip.conf` | Extracts visitor IP from CF-Connecting-IP header |
+| Cloudflare-Only Access | `/etc/nginx/conf.d/cloudflare-only.conf` | Blocks direct server access (geo block) |
+| Security Headers | `/etc/nginx/snippets/security-headers.conf` | HSTS, CSP, X-Frame-Options, etc. |
+| WordPress Security | `/etc/nginx/snippets/wordpress-security.conf` | Block xmlrpc.php, PHP in uploads, dotfiles |
+| Rate Limiting | nginx.conf http block | 5r/m on wp-login.php, 30r/m on API |
+
+#### Firewall (UFW)
+- HTTP/HTTPS restricted to Cloudflare IP ranges only
+- Dynamic IP updates from Cloudflare API
+- SSH remains accessible (port 22)
+- State tracking: `UFW_CLOUDFLARE_CONFIGURED`
+
+#### PHP-FPM Hardening
+```ini
+; Security restrictions (per-pool)
+php_admin_value[disable_functions] = exec,passthru,shell_exec,system,proc_open,popen,...
+php_admin_flag[allow_url_fopen] = off
+php_admin_flag[allow_url_include] = off
+php_admin_value[open_basedir] = ${WP_ROOT}:/tmp:/usr/share/php
+php_admin_value[session.save_path] = /var/lib/php/sessions/${pool_name}
+```
+State tracking: `PHP_SECURITY_HARDENING`
+
+#### Fail2Ban Integration
+- Verifies Cloudflare real IP configuration exists
+- Bans based on real visitor IP, not Cloudflare proxy IP
+- State tracking: `FAIL2BAN_CONFIGURED`
+
+#### WordPress Configuration
+```php
+// Disable WP-Cron (handled by system cron for reliability)
+define( 'DISABLE_WP_CRON', true );
+
+// Redis Object Cache (with PhpRedis for optimal performance)
+define( 'WP_REDIS_HOST', '127.0.0.1' );
+```
+- System cron: `/etc/cron.d/wordpress-${domain}`
+- PhpRedis extension: `php${version}-redis`
+- State tracking: `SYSTEM_CRON_CONFIGURED`, `PHPREDIS_AVAILABLE`
+
+#### Verification Test Scripts
+Located in `tests/`:
+- `verify-cloudflare-realip.sh` - Real IP detection (5 checks)
+- `verify-cloudflare-only.sh` - Cloudflare-only access (9 checks)
+- `verify-php-fpm-security.sh` - PHP hardening (7 checks)
+- `verify-security-headers.sh` - Security headers (10 checks)
+- `verify-rate-limiting.sh` - Rate limiting (9 checks)
+- `verify-ufw-cloudflare.sh` - UFW configuration (8 checks)
+- `verify-fail2ban-cloudflare.sh` - Fail2Ban integration (9 checks)
+- `verify-system-cron.sh` - System cron (8 checks)
+- `verify-phpredis.sh` - PhpRedis extension (7 checks)
 
 ---
 
@@ -583,6 +644,6 @@ Before committing changes, verify:
 
 ---
 
-*Document Version: 1.0*
-*Last Updated: 2025-12-13*
-*Codebase Version: 3.1.4*
+*Document Version: 1.1*
+*Last Updated: 2026-01-12*
+*Codebase Version: 3.1.5*
