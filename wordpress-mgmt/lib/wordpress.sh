@@ -2106,8 +2106,13 @@ ensure_wordpress_permissions() {
         if [ ! -d "$wp_root/$dir" ]; then
             sudo mkdir -p "$wp_root/$dir"
         fi
+        # Set directory permissions
         sudo chown php-fpm:wordpress "$wp_root/$dir"
         sudo chmod 2775 "$wp_root/$dir"
+        # Set recursive ownership and permissions on contents (for existing files)
+        sudo chown -R php-fpm:wordpress "$wp_root/$dir"
+        sudo find "$wp_root/$dir" -type f -exec chmod 664 {} \; 2>/dev/null || true
+        sudo find "$wp_root/$dir" -type d -exec chmod 2775 {} \; 2>/dev/null || true
     done
 
     debug "WordPress permissions standardized"
