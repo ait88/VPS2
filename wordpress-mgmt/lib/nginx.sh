@@ -163,7 +163,8 @@ EOF
     restart_service "php${php_version}-fpm"
     
     save_state "PHP_FPM_SOCKET" "/run/php/php${php_version}-fpm-$pool_name.sock"
-    debug "PHP-FPM pool configured"
+    save_state "PHP_SECURITY_HARDENING" "true"
+    debug "PHP-FPM pool configured with security hardening"
 }
 
 configure_waf_settings() {
