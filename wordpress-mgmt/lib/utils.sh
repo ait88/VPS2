@@ -288,12 +288,25 @@ enforce_standard_permissions() {
     fi
     
     # Writable areas owned by php-fpm for write access
-    local writable_dirs=("wp-content/uploads" "wp-content/cache" "wp-content/upgrade" "tmp")
+    # Include upgrade-temp-backup subdirectories for plugin/theme updates
+    local writable_dirs=(
+        "wp-content/uploads"
+        "wp-content/cache"
+        "wp-content/upgrade"
+        "wp-content/upgrade-temp-backup"
+        "wp-content/upgrade-temp-backup/plugins"
+        "wp-content/upgrade-temp-backup/themes"
+        "wp-content/wflogs"
+        "tmp"
+    )
+
+    # Create directories if they don't exist, then set permissions
     for dir in "${writable_dirs[@]}"; do
-        if [ -d "$wp_root/$dir" ]; then
-            sudo chown php-fpm:wordpress "$wp_root/$dir"
-            sudo chmod 2775 "$wp_root/$dir"
+        if [ ! -d "$wp_root/$dir" ]; then
+            sudo mkdir -p "$wp_root/$dir"
         fi
+        sudo chown php-fpm:wordpress "$wp_root/$dir"
+        sudo chmod 2775 "$wp_root/$dir"
     done
     
     # Restricted access areas
@@ -658,7 +671,8 @@ HEADER
         echo "Nginx Version: $(nginx -v 2>&1 | head -1)"
         echo ""
         echo "Sites Enabled:"
-        ls -1 /etc/nginx/sites-enabled/ 2>/dev/null | sed 's/^/  - [SITE_REDACTED] /' || echo "  (none)"
+        local site_count=$(ls -1 /etc/nginx/sites-enabled/ 2>/dev/null | wc -l)
+        echo "  - $site_count site(s) configured [names redacted]"
         echo ""
         echo "Config Test: $(sudo nginx -t 2>&1 | tail -1)"
         echo '```'
@@ -732,9 +746,19 @@ HEADER
                     DB_NAME)
                         echo "$key=[DB_NAME_REDACTED]"
                         ;;
-                    WP_ROOT|BACKUP_*|*_DIR|*_PATH)
-                        # Redact home directory paths
-                        local anon_value=$(echo "$value" | sed 's|/home/[^/]*|/home/[USER]|g')
+                    *WHITELIST*|*_IPS)
+                        # Redact IP addresses in whitelist values
+                        local anon_value=$(echo "$value" | sed -E 's/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[IP_REDACTED]/g')
+                        echo "$key=$anon_value"
+                        ;;
+                    WP_ROOT|BACKUP_*|*_DIR|*_PATH|*_FILE|CRON_FILE)
+                        # Redact home directory and domain from paths
+                        local anon_value="$value"
+                        anon_value=$(echo "$anon_value" | sed 's|/home/[^/]*|/home/[USER]|g')
+                        # Replace domain in paths if set
+                        if [ -n "$domain" ]; then
+                            anon_value=$(echo "$anon_value" | sed "s|$domain|[DOMAIN]|g")
+                        fi
                         echo "$key=$anon_value"
                         ;;
                     *)
@@ -793,11 +817,21 @@ HEADER
 
         # Function to anonymize log content
         anonymize_log() {
-            sed -E \
-                -e 's/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[IP]/g' \
-                -e 's/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/[EMAIL]/g' \
-                -e 's|https?://[^[:space:]"]+|[URL]|g' \
-                -e "s/$domain/[DOMAIN]/g" 2>/dev/null || cat
+            local content
+            content=$(cat)
+            # Replace IPs
+            content=$(echo "$content" | sed -E 's/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[IP]/g')
+            # Replace emails
+            content=$(echo "$content" | sed -E 's/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/[EMAIL]/g')
+            # Replace URLs
+            content=$(echo "$content" | sed -E 's|https?://[^[:space:]"]+|[URL]|g')
+            # Replace domain in paths (e.g., /var/www/example.com/...)
+            if [ -n "$domain" ]; then
+                content=$(echo "$content" | sed "s|$domain|[DOMAIN]|g")
+            fi
+            # Replace any remaining paths that look like domain-based WordPress roots
+            content=$(echo "$content" | sed -E 's|/var/www/[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|/var/www/[DOMAIN]|g')
+            echo "$content"
         }
 
         echo "### Nginx Error Log"
@@ -812,7 +846,8 @@ HEADER
 
         echo "### PHP-FPM Log"
         echo '```'
-        local php_log="/var/log/php/${php_version}-fpm-${wp_user}_pool-error.log"
+        local php_ver=$(get_php_version 2>/dev/null || echo "8.3")
+        local php_log="/var/log/php/${php_ver}-fpm-${wp_user}_pool-error.log"
         if [ -f "$php_log" ]; then
             sudo tail -20 "$php_log" 2>/dev/null | anonymize_log || echo "(unable to read)"
         else

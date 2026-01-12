@@ -2090,12 +2090,24 @@ ensure_wordpress_permissions() {
     sudo chmod 2770 "$wp_root/tmp"
 
     # Ensure writable directories have correct ownership for PHP-FPM
-    local writable_dirs=("wp-content/uploads" "wp-content/cache" "wp-content/upgrade" "wp-content/wflogs")
+    # Include upgrade-temp-backup subdirectories for plugin/theme updates
+    local writable_dirs=(
+        "wp-content/uploads"
+        "wp-content/cache"
+        "wp-content/upgrade"
+        "wp-content/upgrade-temp-backup"
+        "wp-content/upgrade-temp-backup/plugins"
+        "wp-content/upgrade-temp-backup/themes"
+        "wp-content/wflogs"
+    )
+
+    # Create directories if they don't exist, then set permissions
     for dir in "${writable_dirs[@]}"; do
-        if [ -d "$wp_root/$dir" ]; then
-            sudo chown php-fpm:wordpress "$wp_root/$dir"
-            sudo chmod 2775 "$wp_root/$dir"
+        if [ ! -d "$wp_root/$dir" ]; then
+            sudo mkdir -p "$wp_root/$dir"
         fi
+        sudo chown php-fpm:wordpress "$wp_root/$dir"
+        sudo chmod 2775 "$wp_root/$dir"
     done
 
     debug "WordPress permissions standardized"
