@@ -4,43 +4,50 @@
 
 install_wordpress() {
     info "Installing WordPress..."
-    
+
     if state_exists "WORDPRESS_INSTALLED"; then
         # Verify existing installation
         if verify_wordpress_installation; then
             info "✓ WordPress already installed and verified"
+            # Ensure system cron is configured (in case it was skipped before)
+            if ! state_exists "SYSTEM_CRON_CONFIGURED"; then
+                setup_system_cron
+            fi
             return 0
         else
             warning "WordPress marked as installed but verification failed - reinstalling"
             remove_state "WORDPRESS_INSTALLED"
         fi
     fi
-    
+
     # Installation steps
-    show_progress 1 7 "Downloading WordPress"
+    show_progress 1 8 "Downloading WordPress"
     download_wordpress "$(load_state "WP_VERSION")"
-    
-    show_progress 2 7 "Extracting WordPress files"
+
+    show_progress 2 8 "Extracting WordPress files"
     extract_wordpress
-    
-    show_progress 3 7 "Configuring WordPress"
+
+    show_progress 3 8 "Configuring WordPress"
     configure_wordpress
-    
-    show_progress 4 7 "Setting permissions"
+
+    show_progress 4 8 "Setting permissions"
     set_wordpress_permissions
-    
-    show_progress 5 7 "Installing plugins"
+
+    show_progress 5 8 "Installing plugins"
     install_default_plugins
-    
-    show_progress 6 7 "Finalizing installation"
+
+    show_progress 6 8 "Finalizing installation"
     finalize_wordpress_install
 
-    show_progress 7 7 "Verifying installation"
+    show_progress 7 8 "Setting up system cron"
+    setup_system_cron
+
+    show_progress 8 8 "Verifying installation"
     verify_wordpress_installation
-    
+
     # Ensure consistent permissions after WordPress setup
     ensure_wordpress_permissions
-    
+
     save_state "WORDPRESS_INSTALLED" "true"
     success "✓ WordPress installed successfully"
 }
@@ -150,6 +157,9 @@ define( 'DISALLOW_FILE_EDIT', true );
 define( 'DISALLOW_FILE_MODS', false );
 define( 'FORCE_SSL_ADMIN', true );
 define( 'WP_AUTO_UPDATE_CORE', 'minor' );
+
+// Disable WP-Cron (handled by system cron for reliability)
+define( 'DISABLE_WP_CRON', true );
 
 // Performance settings
 define( 'WP_MEMORY_LIMIT', '$(load_state "PHP_MEMORY_LIMIT" "256M")' );
@@ -1998,37 +2008,43 @@ restore_from_backup() {
 # Complete WordPress infrastructure setup (shared by import and restore)
 complete_wordpress_setup() {
     info "=== Completing WordPress Infrastructure Setup ==="
-    
+
     # Install required packages if not already installed
     if ! state_exists "PACKAGES_INSTALLED"; then
         info "Installing required packages..."
         install_packages
     fi
-    
+
     # Configure Nginx web server
     if ! state_exists "NGINX_CONFIGURED"; then
         info "Configuring Nginx web server..."
         configure_nginx
     fi
-    
+
     # Setup SSL certificates
     if ! state_exists "SSL_CONFIGURED"; then
         info "Setting up SSL certificates..."
         setup_ssl
     fi
-    
+
+    # Setup system cron for WordPress
+    if ! state_exists "SYSTEM_CRON_CONFIGURED"; then
+        info "Setting up system cron for WordPress..."
+        setup_system_cron
+    fi
+
     # Apply security hardening
     if ! state_exists "SECURITY_CONFIGURED"; then
         info "Applying security hardening..."
         apply_security
     fi
-    
+
     # Setup backup system
     if ! state_exists "BACKUP_CONFIGURED"; then
         info "Setting up backup system..."
         setup_backup_system
     fi
-    
+
     success "WordPress infrastructure setup completed successfully!"
     show_completion_summary
 }
@@ -2037,20 +2053,20 @@ complete_wordpress_setup() {
 ensure_wordpress_permissions() {
     local wp_root=$(load_state "WP_ROOT")
     local wp_user=$(load_state "WP_USER")
-    
+
     info "Enforcing standardized WordPress permissions..."
-    
+
     # Set consistent ownership - all files use wordpress group
     sudo chown -R "$wp_user:wordpress" "$wp_root"
-    
+
     # Create necessary directories with correct permissions if they don't exist
     sudo mkdir -p "$wp_root"/{tmp,logs,backups}
     sudo chown "$wp_user:wordpress" "$wp_root"/{tmp,logs,backups}
-    
+
     # Set proper permissions for backup/log directories
     sudo chmod 2750 "$wp_root"/{logs,backups}
     sudo chmod 2770 "$wp_root/tmp"
-    
+
     # Ensure writable directories have correct ownership for PHP-FPM
     local writable_dirs=("wp-content/uploads" "wp-content/cache" "wp-content/upgrade")
     for dir in "${writable_dirs[@]}"; do
@@ -2059,8 +2075,64 @@ ensure_wordpress_permissions() {
             sudo chmod 2775 "$wp_root/$dir"
         fi
     done
-    
+
     debug "WordPress permissions standardized"
+}
+
+# Setup system cron to replace WP-Cron for reliable scheduled tasks
+# Implements: feat(wordpress): Replace WP-Cron with system cron for reliability (#6)
+setup_system_cron() {
+    info "Setting up system cron for WordPress..."
+
+    if state_exists "SYSTEM_CRON_CONFIGURED"; then
+        info "✓ System cron already configured"
+        return 0
+    fi
+
+    local domain=$(load_state "DOMAIN")
+    local wp_root=$(load_state "WP_ROOT")
+    local wp_user=$(load_state "WP_USER")
+
+    # Sanitize domain for use in filename (replace dots and dashes with underscores)
+    local domain_sanitized="${domain//[.-]/_}"
+    local cron_file="/etc/cron.d/wordpress-${domain_sanitized}"
+
+    info "Creating cron job at $cron_file..."
+
+    # Create cron job that runs every minute
+    sudo tee "$cron_file" >/dev/null <<EOF
+# WordPress Cron - System cron replacement for WP-Cron
+# Generated by setup-wordpress.sh for domain: $domain
+# Runs WordPress scheduled tasks every minute
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# Run WordPress cron events that are due
+* * * * * $wp_user cd $wp_root && /usr/bin/wp cron event run --due-now --quiet 2>/dev/null
+EOF
+
+    # Set proper permissions (644 - readable by all, writable by root only)
+    sudo chmod 644 "$cron_file"
+
+    # Verify wp-cli is available
+    if ! command -v wp &>/dev/null; then
+        warning "WP-CLI not found - cron job created but may not work until WP-CLI is installed"
+    else
+        # Test WP-CLI access
+        if sudo -u "$wp_user" wp --path="$wp_root" --version &>/dev/null 2>&1; then
+            success "WP-CLI access verified"
+        else
+            warning "WP-CLI access test failed - cron job may need adjustment"
+        fi
+    fi
+
+    save_state "SYSTEM_CRON_CONFIGURED" "true"
+    save_state "CRON_FILE" "$cron_file"
+    success "✓ System cron configured successfully"
+
+    info "WordPress scheduled tasks will now run via system cron instead of WP-Cron"
+    info "Cron file: $cron_file"
 }
 
 debug "WordPress module loaded successfully"
