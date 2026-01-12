@@ -623,27 +623,39 @@ add_header Content-Security-Policy "default-src 'self' https: data: 'unsafe-inli
 EOF
     
     # Create WordPress security snippet
+    # Implements: feat(nginx): Block xmlrpc.php and PHP execution in uploads directory (#15)
     sudo tee /etc/nginx/snippets/wordpress-security.conf >/dev/null <<'EOF'
 # WordPress Security Rules
 
-# Deny access to xmlrpc.php
+# Block XML-RPC (heavily targeted by bots)
 location = /xmlrpc.php {
     deny all;
+    access_log off;
+    log_not_found off;
 }
 
-# Deny access to wp-config.php
+# Block PHP execution in uploads (prevents malware execution)
+location ~* /(?:uploads|files|wp-content/uploads)/.*\.php$ {
+    deny all;
+    access_log off;
+    log_not_found off;
+}
+
+# Block wp-config.php direct access
 location ~ /wp-config\.php {
     deny all;
 }
 
-# Deny access to debug.log
+# Block debug.log access
 location ~ /wp-content/debug\.log {
     deny all;
 }
 
-# Prevent PHP execution in uploads
-location ~ /wp-content/uploads/.*\.php$ {
+# Block hidden files (dotfiles)
+location ~ /\. {
     deny all;
+    access_log off;
+    log_not_found off;
 }
 
 # Block author scans
