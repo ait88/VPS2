@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ===== CONFIGURATION =====
-SCRIPT_VERSION="3.1.6"
+SCRIPT_VERSION="3.2.0"
 SCRIPT_URL="https://raw.githubusercontent.com/ait88/VPS2/main/setup-wordpress.sh"
 BASE_URL="https://raw.githubusercontent.com/ait88/VPS2/main/wordpress-mgmt"
 
@@ -621,9 +621,10 @@ show_utils_menu() {
     echo "6) Test SSH Import Connectivity"
     echo "7) Migrate Cron Jobs from Remote Server"
     echo "8) Generate Debug Report (for troubleshooting)"
-    echo "9) Back to Main Menu"
+    echo "9) Security Hardening"
+    echo "10) Back to Main Menu"
     echo
-    read -p "Enter your choice [1-9]: " choice
+    read -p "Enter your choice [1-10]: " choice
     echo
 
     case $choice in
@@ -635,10 +636,62 @@ show_utils_menu() {
         6) test_ssh_import && show_utils_menu ;;
         7) migrate_cron_jobs && show_utils_menu ;;
         8) run_debug_report ;;
-        9) show_menu ;;
+        9) show_security_menu ;;
+        10) show_menu ;;
         *)
             error "Invalid choice: $choice"
             show_utils_menu
+            ;;
+    esac
+}
+
+# ===== SECURITY HARDENING MENU =====
+show_security_menu() {
+    load_module "utils.sh" || { error "Failed to load utils module"; return 1; }
+
+    echo
+    echo -e "\033[1;36m=== Security Hardening ===\033[0m"
+    echo
+
+    # Show current status
+    show_security_status
+
+    echo "Options:"
+    echo "1) Apply Standard Security (recommended for most sites)"
+    echo "2) Apply Extra Hardened Security (for high-risk sites)"
+    echo "3) Back to Utils Menu"
+    echo
+    read -p "Enter your choice [1-3]: " choice
+    echo
+
+    case $choice in
+        1)
+            if confirm "Apply Standard Security level?" Y; then
+                apply_standard_security
+            else
+                info "Cancelled"
+            fi
+            show_security_menu
+            ;;
+        2)
+            warning "Extra Hardened mode will:"
+            echo "  • Block plugin/theme installation via wp-admin"
+            echo "  • Block WordPress auto-updates"
+            echo "  • Make wp-config.php immutable"
+            echo ""
+            echo "You will need to use WP-CLI for updates."
+            echo ""
+            if confirm "Apply Extra Hardened Security level?" N; then
+                apply_extra_hardened_security
+            else
+                info "Cancelled"
+            fi
+            show_security_menu
+            ;;
+        3) show_utils_menu ;;
+        *)
+            error "Invalid choice: $choice"
+            show_security_menu
             ;;
     esac
 }

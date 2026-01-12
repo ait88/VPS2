@@ -247,27 +247,29 @@ configure_wordpress_loopback() {
     local wp_root=$(load_state "WP_ROOT")
     local domain=$(load_state "DOMAIN")
     local wp_config="$wp_root/wp-config.php"
-    
-    info "Configuring WordPress loopback and REST API..."
-    
+
+    info "Configuring WordPress for Standard security level..."
+
     if [ ! -f "$wp_config" ]; then
-        warning "wp-config.php not found, skipping loopback configuration"
+        warning "wp-config.php not found, skipping configuration"
         return 1
     fi
-    
+
+    # Standard security: Allow outbound HTTP for WordPress functionality
+    # WP_HTTP_BLOCK_EXTERNAL is NOT set (or removed if present)
+    # This allows: REST API, plugin updates, loopback requests, Site Health checks
+
+    # Remove any existing WP_HTTP_BLOCK_EXTERNAL setting (from Extra Hardened)
     if grep -q "WP_HTTP_BLOCK_EXTERNAL" "$wp_config" 2>/dev/null; then
-        debug "HTTP configuration already present"
-        return 0
+        sudo sed -i '/WP_HTTP_BLOCK_EXTERNAL/d' "$wp_config"
+        sudo sed -i '/WP_ACCESSIBLE_HOSTS/d' "$wp_config"
+        info "Removed HTTP blocking for Standard security"
     fi
-    
-    sudo sed -i "/require_once.*ABSPATH.*wp-settings.php/i\\
-\\
-/* Allow loopback requests for REST API, cron, and auto-updates */\\
-define('WP_HTTP_BLOCK_EXTERNAL', true);\\
-define('WP_ACCESSIBLE_HOSTS', 'localhost,127.0.0.1,*.wordpress.org,*.w.org,$domain');\\
-" "$wp_config"
-    
-    info "Loopback configuration added to wp-config.php"
+
+    # Save security level to state
+    save_state "SECURITY_LEVEL" "standard"
+
+    info "Standard security configured (outbound HTTP allowed)"
 }
 
 set_wordpress_permissions() {

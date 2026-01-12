@@ -952,4 +952,173 @@ HEADER
     info "You can copy the above output or attach the file when reporting issues."
 }
 
+# ===== SECURITY HARDENING =====
+
+get_security_level() {
+    local level=$(load_state "SECURITY_LEVEL" "standard")
+    echo "$level"
+}
+
+apply_standard_security() {
+    local wp_root=$(load_state "WP_ROOT")
+    local wp_config="$wp_root/wp-config.php"
+
+    info "Applying Standard security level..."
+
+    if [ ! -f "$wp_config" ]; then
+        error "wp-config.php not found at $wp_config"
+        return 1
+    fi
+
+    # Remove immutable flag if set (from Extra Hardened)
+    sudo chattr -i "$wp_config" 2>/dev/null || true
+
+    # Remove WP_HTTP_BLOCK_EXTERNAL (allows outbound HTTP)
+    if grep -q "WP_HTTP_BLOCK_EXTERNAL" "$wp_config"; then
+        sudo sed -i '/WP_HTTP_BLOCK_EXTERNAL/d' "$wp_config"
+        sudo sed -i '/WP_ACCESSIBLE_HOSTS/d' "$wp_config"
+    fi
+
+    # Ensure DISALLOW_FILE_MODS is false (allows plugin/theme installation)
+    if grep -q "DISALLOW_FILE_MODS.*true" "$wp_config"; then
+        sudo sed -i "s/define.*'DISALLOW_FILE_MODS'.*/define( 'DISALLOW_FILE_MODS', false );/" "$wp_config"
+    fi
+
+    # Keep DISALLOW_FILE_EDIT true (blocks theme/plugin editor, security best practice)
+    if ! grep -q "DISALLOW_FILE_EDIT" "$wp_config"; then
+        sudo sed -i "/require_once.*ABSPATH.*wp-settings.php/i\\
+define( 'DISALLOW_FILE_EDIT', true );\\
+" "$wp_config"
+    fi
+
+    # Apply standard file permissions
+    enforce_standard_permissions
+
+    save_state "SECURITY_LEVEL" "standard"
+    success "✓ Standard security applied"
+    echo ""
+    echo "Standard security allows:"
+    echo "  • Plugin/theme installation via wp-admin"
+    echo "  • WordPress auto-updates"
+    echo "  • REST API and loopback requests"
+    echo "  • Site Health checks"
+    echo "  • Wordfence rule fetching"
+    echo ""
+    echo "Restrictions:"
+    echo "  • Theme/plugin file editor disabled (use SFTP)"
+}
+
+apply_extra_hardened_security() {
+    local wp_root=$(load_state "WP_ROOT")
+    local domain=$(load_state "DOMAIN")
+    local wp_config="$wp_root/wp-config.php"
+
+    info "Applying Extra Hardened security level..."
+    warning "This will restrict wp-admin functionality!"
+
+    if [ ! -f "$wp_config" ]; then
+        error "wp-config.php not found at $wp_config"
+        return 1
+    fi
+
+    # Remove immutable flag first (in case we're re-applying)
+    sudo chattr -i "$wp_config" 2>/dev/null || true
+
+    # Add/update WP_HTTP_BLOCK_EXTERNAL
+    if grep -q "WP_HTTP_BLOCK_EXTERNAL" "$wp_config"; then
+        sudo sed -i "s/define.*'WP_HTTP_BLOCK_EXTERNAL'.*/define('WP_HTTP_BLOCK_EXTERNAL', true);/" "$wp_config"
+    else
+        sudo sed -i "/require_once.*ABSPATH.*wp-settings.php/i\\
+\\
+/* Extra Hardened Security - External HTTP blocked */\\
+define('WP_HTTP_BLOCK_EXTERNAL', true);\\
+define('WP_ACCESSIBLE_HOSTS', 'localhost,127.0.0.1,*.wordpress.org,*.w.org,$domain');\\
+" "$wp_config"
+    fi
+
+    # Set DISALLOW_FILE_MODS to true (blocks all file modifications)
+    if grep -q "DISALLOW_FILE_MODS" "$wp_config"; then
+        sudo sed -i "s/define.*'DISALLOW_FILE_MODS'.*/define( 'DISALLOW_FILE_MODS', true );/" "$wp_config"
+    else
+        sudo sed -i "/require_once.*ABSPATH.*wp-settings.php/i\\
+define( 'DISALLOW_FILE_MODS', true );\\
+" "$wp_config"
+    fi
+
+    # Ensure DISALLOW_FILE_EDIT is true
+    if grep -q "DISALLOW_FILE_EDIT" "$wp_config"; then
+        sudo sed -i "s/define.*'DISALLOW_FILE_EDIT'.*/define( 'DISALLOW_FILE_EDIT', true );/" "$wp_config"
+    else
+        sudo sed -i "/require_once.*ABSPATH.*wp-settings.php/i\\
+define( 'DISALLOW_FILE_EDIT', true );\\
+" "$wp_config"
+    fi
+
+    # Apply standard permissions first
+    enforce_standard_permissions
+
+    # Make wp-config.php immutable
+    sudo chattr +i "$wp_config"
+
+    save_state "SECURITY_LEVEL" "extra_hardened"
+    success "✓ Extra Hardened security applied"
+    echo ""
+    echo "Extra Hardened restrictions:"
+    echo "  • No plugin/theme installation via wp-admin"
+    echo "  • No WordPress auto-updates (use WP-CLI)"
+    echo "  • External HTTP requests blocked"
+    echo "  • wp-config.php is immutable"
+    echo ""
+    echo "Management:"
+    echo "  • Use 'wp plugin install/update' via CLI"
+    echo "  • Use 'wp core update' via CLI"
+    echo "  • To modify wp-config.php: sudo chattr -i $wp_config"
+    echo ""
+    warning "Site Health will report issues - this is expected with Extra Hardened"
+}
+
+show_security_status() {
+    local wp_root=$(load_state "WP_ROOT")
+    local wp_config="$wp_root/wp-config.php"
+    local level=$(get_security_level)
+
+    echo ""
+    echo "=== Security Hardening Status ==="
+    echo ""
+    echo "Current Level: $level"
+    echo ""
+
+    if [ -f "$wp_config" ]; then
+        echo "wp-config.php settings:"
+
+        if grep -q "WP_HTTP_BLOCK_EXTERNAL.*true" "$wp_config" 2>/dev/null; then
+            echo "  • WP_HTTP_BLOCK_EXTERNAL: true (external HTTP blocked)"
+        else
+            echo "  • WP_HTTP_BLOCK_EXTERNAL: false/unset (external HTTP allowed)"
+        fi
+
+        if grep -q "DISALLOW_FILE_MODS.*true" "$wp_config" 2>/dev/null; then
+            echo "  • DISALLOW_FILE_MODS: true (no plugin/theme changes via wp-admin)"
+        else
+            echo "  • DISALLOW_FILE_MODS: false (plugin/theme changes allowed)"
+        fi
+
+        if grep -q "DISALLOW_FILE_EDIT.*true" "$wp_config" 2>/dev/null; then
+            echo "  • DISALLOW_FILE_EDIT: true (editor disabled)"
+        else
+            echo "  • DISALLOW_FILE_EDIT: false (editor enabled - NOT recommended)"
+        fi
+
+        # Check immutable flag
+        if lsattr "$wp_config" 2>/dev/null | grep -q "i"; then
+            echo "  • wp-config.php: IMMUTABLE (chattr +i)"
+        else
+            echo "  • wp-config.php: mutable"
+        fi
+    else
+        echo "  wp-config.php not found"
+    fi
+    echo ""
+}
+
 debug "Utils module loaded successfully"
