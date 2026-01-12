@@ -307,10 +307,15 @@ update_nginx_ssl() {
         sudo sed -i "/ssl_certificate_key/a\\\n    # SSL Configuration\\n    ssl_protocols TLSv1.2 TLSv1.3;\\n    ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';\\n    ssl_prefer_server_ciphers off;\\n    ssl_session_cache shared:SSL:10m;\\n    ssl_session_timeout 10m;\\n    ssl_stapling on;\\n    ssl_stapling_verify on;\\n    resolver 8.8.8.8 8.8.4.4 valid=300s;\\n    resolver_timeout 5s;" "$nginx_conf"
     fi
     
-    # Add HSTS header (if not WAF)
+    # Add HSTS header (if not WAF - Cloudflare handles HSTS at the edge)
     local waf_type=$(load_state "WAF_TYPE" "none")
     if [ "$waf_type" = "none" ]; then
         sudo sed -i 's|# add_header Strict-Transport-Security|add_header Strict-Transport-Security|' /etc/nginx/snippets/security-headers.conf
+        save_state "HSTS_ENABLED" "true"
+        info "HSTS enabled (1-year max-age with includeSubDomains)"
+    else
+        info "HSTS handled by WAF ($waf_type) - not enabling at origin"
+        save_state "HSTS_ENABLED" "waf"
     fi
     
     # Clean up temporary certificates if they exist

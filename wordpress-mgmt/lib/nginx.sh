@@ -786,6 +786,9 @@ EOF
     if ! grep -q "limit_req_zone.*wordpress_login" /etc/nginx/nginx.conf; then
         sudo sed -i '/http {/a \    # WordPress rate limiting\n    limit_req_zone $binary_remote_addr zone=wordpress_login:10m rate=5r/m;\n    limit_req_zone $binary_remote_addr zone=wordpress_api:10m rate=30r/m;\n' /etc/nginx/nginx.conf
     fi
+
+    save_state "SECURITY_HEADERS_CONFIGURED" "true"
+    debug "Security headers configured"
 }
 
 enable_site_config() {
