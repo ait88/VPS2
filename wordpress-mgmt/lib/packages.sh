@@ -117,6 +117,7 @@ install_optional_packages() {
         "build-essential"
         "php${php_version}-imagick"
         "php${php_version}-intl" "php${php_version}-bcmath"
+        "php${php_version}-redis"
         "redis-server"
         "inotify-tools"
     )
