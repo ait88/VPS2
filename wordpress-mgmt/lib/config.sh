@@ -135,24 +135,48 @@ configure_interactive() {
     echo
     info "SSL Configuration"
     echo "────────────────────"
-    
-    echo
+
+    local waf_type=$(load_state "WAF_TYPE" "none")
+
+    # Show context-appropriate SSL options
+    if [ "$waf_type" = "cloudflare" ] || [ "$waf_type" = "cloudflare_ent" ]; then
+        echo
+        echo "For Cloudflare proxy, Let's Encrypt is recommended."
+        echo "(Cloudflare Origin CA certificates can cause renewal issues)"
+        echo
+    fi
+
     PS3="Select SSL configuration: "
     local ssl_options=(
-        "Cloudflare Origin Certificate (Recommended for CF proxy)"
-        "Let's Encrypt (Direct access only)"
+        "Let's Encrypt (Recommended)"
+        "Cloudflare Origin Certificate"
         "Self-signed (Development)"
         "Manual (I'll configure later)"
         "None (HTTP only)"
     )
-    
+
     select ssl_opt in "${ssl_options[@]}"; do
         case $REPLY in
-            1) save_state "SSL_TYPE" "cloudflare_origin"; break ;;
-            2) save_state "SSL_TYPE" "letsencrypt"; break ;;
+            1|"")
+                save_state "SSL_TYPE" "letsencrypt"
+                info "Let's Encrypt selected"
+                break
+                ;;
+            2)
+                if [ "$waf_type" = "cloudflare" ] || [ "$waf_type" = "cloudflare_ent" ]; then
+                    warning "Note: Cloudflare Origin CA requires manual certificate management"
+                fi
+                save_state "SSL_TYPE" "cloudflare_origin"
+                break
+                ;;
             3) save_state "SSL_TYPE" "selfsigned"; break ;;
             4) save_state "SSL_TYPE" "manual"; break ;;
             5) save_state "SSL_TYPE" "none"; break ;;
+            *)
+                echo "Invalid selection, defaulting to Let's Encrypt"
+                save_state "SSL_TYPE" "letsencrypt"
+                break
+                ;;
         esac
     done
     
@@ -273,52 +297,40 @@ configure_interactive() {
 
 configure_waf_proxy() {
     echo
-    echo "Is this server on a local network or behind an upstream proxy/WAF?"
-    echo "(e.g., Nginx Proxy Manager, Cloudflare Tunnel, etc.)"
-    
-    if confirm "Server is behind upstream proxy?" N; then
-        save_state "WAF_TYPE" "upstream_proxy"
-        info "Minimal nginx config will be used (upstream proxy handles SSL/routing)"
-        
-        echo
-        if confirm "Restrict firewall to upstream proxy IP only? (recommended)" Y; then
-            read -p "Enter upstream proxy IP address: " proxy_ip
-            if [[ "$proxy_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-                save_state "UPSTREAM_PROXY_IP" "$proxy_ip"
-                info "Will restrict HTTP/HTTPS to $proxy_ip only"
-            else
-                warning "Invalid IP format - will allow all traffic"
-            fi
-        fi
-        return
-    fi
-    
-    PS3="Select WAF/Proxy configuration: "
+    info "WAF/Proxy Configuration"
+    echo "────────────────────"
+    echo
+    echo "Select your WAF/proxy configuration:"
+    echo "(Cloudflare is recommended for security and performance)"
+    echo
+
+    PS3="Select option [default: 1]: "
     local waf_options=(
-        "None - Direct Internet access"
-        "Cloudflare Free/Pro"
-        "Cloudflare Enterprise"
+        "Cloudflare Proxy (recommended)"
+        "Direct Access (no proxy)"
+        "Upstream Proxy (NPM, Traefik, etc.)"
         "Sucuri WAF"
-        "BunkerWeb"
+        "Cloudflare Enterprise"
         "Custom WAF/Proxy"
     )
-    
+
     select waf in "${waf_options[@]}"; do
         case $REPLY in
-            1)
+            1|"")
+                save_state "WAF_TYPE" "cloudflare"
+                info "Cloudflare proxy selected"
+                configure_cloudflare_ips
+                break
+                ;;
+            2)
                 save_state "WAF_TYPE" "none"
                 info "Direct Internet access selected"
                 break
                 ;;
-            2)
-                save_state "WAF_TYPE" "cloudflare"
-                configure_cloudflare_ips
-                break
-                ;;
             3)
-                save_state "WAF_TYPE" "cloudflare_ent"
-                info "Enter Cloudflare Enterprise IP ranges:"
-                configure_custom_waf_ips
+                save_state "WAF_TYPE" "upstream_proxy"
+                info "Minimal nginx config will be used (upstream proxy handles SSL/routing)"
+                configure_upstream_proxy
                 break
                 ;;
             4)
@@ -327,8 +339,9 @@ configure_waf_proxy() {
                 break
                 ;;
             5)
-                save_state "WAF_TYPE" "bunkerweb"
-                configure_bunkerweb
+                save_state "WAF_TYPE" "cloudflare_ent"
+                info "Enter Cloudflare Enterprise IP ranges:"
+                configure_custom_waf_ips
                 break
                 ;;
             6)
@@ -336,8 +349,27 @@ configure_waf_proxy() {
                 configure_custom_waf_ips
                 break
                 ;;
+            *)
+                echo "Invalid selection, defaulting to Cloudflare"
+                save_state "WAF_TYPE" "cloudflare"
+                configure_cloudflare_ips
+                break
+                ;;
         esac
     done
+}
+
+configure_upstream_proxy() {
+    echo
+    if confirm "Restrict firewall to upstream proxy IP only? (recommended)" Y; then
+        read -p "Enter upstream proxy IP address: " proxy_ip
+        if [[ "$proxy_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+            save_state "UPSTREAM_PROXY_IP" "$proxy_ip"
+            info "Will restrict HTTP/HTTPS to $proxy_ip only"
+        else
+            warning "Invalid IP format - will allow all traffic"
+        fi
+    fi
 }
 
 configure_cloudflare_ips() {
