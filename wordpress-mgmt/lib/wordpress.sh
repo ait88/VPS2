@@ -194,6 +194,16 @@ EOF
 
     # Add Redis configuration if enabled
     if [ "$(load_state "ENABLE_REDIS")" = "true" ]; then
+        # Verify PhpRedis extension is available for optimal performance
+        if php -m | grep -qi "^redis$"; then
+            success "PhpRedis extension loaded - optimal performance for object caching"
+            save_state "PHPREDIS_AVAILABLE" "true"
+        else
+            warning "PhpRedis extension not loaded - Redis Object Cache will use slower Predis"
+            warning "Install php-redis package for better performance"
+            save_state "PHPREDIS_AVAILABLE" "false"
+        fi
+
         local redis_pass=$(load_state "REDIS_PASS")
         sudo tee -a "$wp_root/wp-config.php" >/dev/null <<EOF
 
