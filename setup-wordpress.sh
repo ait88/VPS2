@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ===== CONFIGURATION =====
-SCRIPT_VERSION="3.1.4"
+SCRIPT_VERSION="3.1.5"
 SCRIPT_URL="https://raw.githubusercontent.com/ait88/VPS2/main/setup-wordpress.sh"
 BASE_URL="https://raw.githubusercontent.com/ait88/VPS2/main/wordpress-mgmt"
 
@@ -180,6 +180,79 @@ check_update() {
     fi
 
     rm -f "$temp_script"
+}
+
+# Force update - unconditionally updates setup-wordpress.sh and all lib modules
+force_update() {
+    info "=== Force Update ==="
+    echo
+    echo "This will update:"
+    echo "  • setup-wordpress.sh (main script)"
+    echo "  • All library modules in wordpress-mgmt/lib/"
+    echo
+
+    if ! confirm "Proceed with force update?" Y; then
+        info "Update cancelled"
+        return 0
+    fi
+
+    local failed=0
+
+    # Step 1: Update main script
+    info "Updating setup-wordpress.sh..."
+    local temp_script="/tmp/setup-wordpress-new.sh"
+
+    if curl -fsSL "$SCRIPT_URL" -o "$temp_script" 2>/dev/null; then
+        local new_version=$(grep "^SCRIPT_VERSION=" "$temp_script" | head -1 | cut -d'"' -f2)
+
+        # Create backup
+        cp "$0" "$0.backup-$(date +%Y%m%d-%H%M%S)"
+
+        # Replace script
+        mv "$temp_script" "$0"
+        chmod +x "$0"
+
+        success "✓ setup-wordpress.sh updated (v${SCRIPT_VERSION} → v${new_version:-unknown})"
+    else
+        error "✗ Failed to download setup-wordpress.sh"
+        failed=1
+    fi
+
+    # Step 2: Update all lib modules
+    info "Updating library modules..."
+    local module_count=0
+    local module_failed=0
+
+    for module in "${MODULES[@]}"; do
+        local module_path="$LIB_DIR/$module"
+        local module_url="$BASE_URL/lib/$module"
+
+        if curl -fsSL "$module_url" -o "$module_path" 2>/dev/null; then
+            chmod +x "$module_path"
+            ((module_count++))
+            debug "✓ Updated: $module"
+        else
+            error "✗ Failed to update: $module"
+            ((module_failed++))
+            failed=1
+        fi
+    done
+
+    echo
+    if [ $failed -eq 0 ]; then
+        success "=== Force Update Complete ==="
+        echo "Updated: setup-wordpress.sh + $module_count modules"
+        echo
+        info "Restarting script with updated version..."
+        exec "$0" "$@"
+    else
+        warning "=== Force Update Completed with Errors ==="
+        echo "Updated: $module_count modules"
+        echo "Failed: $module_failed modules"
+        echo
+        warning "Some updates failed. Check network connection and try again."
+        return 1
+    fi
 }
 
 # ===== INSTALLATION MODES =====
@@ -504,7 +577,7 @@ show_menu() {
     echo "5) Utils Menu (Permissions, Domain Change, Nuke)"
     echo "6) Monitoring Menu"
     echo "7) Maintenance Menu"
-    echo "8) Update modules"
+    echo "8) Force Update (script + all modules)"
     echo
     echo "9) Exit"
     echo
@@ -519,15 +592,7 @@ show_menu() {
         5) show_utils_menu ;;
         6) show_monitoring_menu ;;
         7) show_maintenance_menu ;;
-        8)
-            UPDATE_MODULES=1
-            info "Updating all modules..."
-            for module in "${MODULES[@]}"; do
-                download_module "$module"
-            done
-            success "All modules updated"
-            show_menu
-            ;;
+        8) force_update ;;
         9)
             info "Exiting..."
             exit 0
@@ -1270,6 +1335,13 @@ main() {
                 UPDATE_MODULES=1
                 shift
                 ;;
+            --force-update)
+                # Initialize logging first
+                touch "$LOG_FILE"
+                info "WordPress Setup Script v${SCRIPT_VERSION} started"
+                force_update
+                exit 0
+                ;;
             --fresh)
                 mode_fresh_install
                 exit 0
@@ -1277,10 +1349,11 @@ main() {
             --help)
                 echo "Usage: $0 [OPTIONS]"
                 echo "Options:"
-                echo "  --debug     Enable debug output"
-                echo "  --update    Force module updates"
-                echo "  --fresh     Run fresh installation without menu"
-                echo "  --help      Show this help"
+                echo "  --debug         Enable debug output"
+                echo "  --update        Force module re-download on load"
+                echo "  --force-update  Update script and all modules from GitHub"
+                echo "  --fresh         Run fresh installation without menu"
+                echo "  --help          Show this help"
                 exit 0
                 ;;
             *)
