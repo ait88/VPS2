@@ -288,8 +288,10 @@ enforce_standard_permissions() {
     fi
     
     # Writable areas owned by php-fpm for write access
-    # Include upgrade-temp-backup subdirectories for plugin/theme updates
+    # These directories need PHP-FPM write access for WordPress functionality
     local writable_dirs=(
+        "wp-content/plugins"
+        "wp-content/themes"
         "wp-content/uploads"
         "wp-content/cache"
         "wp-content/upgrade"

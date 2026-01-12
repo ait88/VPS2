@@ -2092,8 +2092,10 @@ ensure_wordpress_permissions() {
     sudo chmod 2770 "$wp_root/tmp"
 
     # Ensure writable directories have correct ownership for PHP-FPM
-    # Include upgrade-temp-backup subdirectories for plugin/theme updates
+    # These directories need PHP-FPM write access for WordPress functionality
     local writable_dirs=(
+        "wp-content/plugins"
+        "wp-content/themes"
         "wp-content/uploads"
         "wp-content/cache"
         "wp-content/upgrade"
