@@ -526,4 +526,386 @@ update_php_version() {
     fi
 }
 
+# ===== ANONYMIZED DEBUG REPORT =====
+# Generates comprehensive system state for troubleshooting
+# All sensitive data (domains, IPs, emails, passwords, keys) is anonymized
+
+generate_debug_report() {
+    local output_dir="$WP_MGMT_DIR"
+    local timestamp=$(date +%Y%m%d-%H%M%S)
+    local output_file="$output_dir/debug-${timestamp}.md"
+    local temp_file="/tmp/debug-report-$$.md"
+
+    info "Generating anonymized debug report..."
+
+    # Collect sensitive values for anonymization
+    local domain=$(load_state "DOMAIN" "")
+    local admin_email=$(load_state "ADMIN_EMAIL" "")
+    local wp_user=$(load_state "WP_USER" "wpuser")
+    local db_name=$(load_state "DB_NAME" "")
+    local db_user=$(load_state "DB_USER" "")
+    local wp_root=$(load_state "WP_ROOT" "/var/www/wordpress")
+
+    # Start building report
+    cat > "$temp_file" << 'HEADER'
+# WordPress VPS Debug Report
+
+> **Generated:** TIMESTAMP_PLACEHOLDER
+> **Script Version:** VERSION_PLACEHOLDER
+>
+> This report contains anonymized system information for troubleshooting.
+> Sensitive data (domains, IPs, emails, passwords) has been redacted.
+
+---
+
+HEADER
+
+    # Replace placeholders
+    sed -i "s/TIMESTAMP_PLACEHOLDER/$(date '+%Y-%m-%d %H:%M:%S %Z')/" "$temp_file"
+    sed -i "s/VERSION_PLACEHOLDER/$(load_state "SCRIPT_VERSION" "unknown")/" "$temp_file"
+
+    # Section 1: System Information
+    {
+        echo "## 1. System Information"
+        echo ""
+        echo '```'
+        echo "OS: $(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d'"' -f2 || echo 'Unknown')"
+        echo "Kernel: $(uname -r)"
+        echo "Architecture: $(uname -m)"
+        echo "Hostname: [HOSTNAME_REDACTED]"
+        echo ""
+        echo "Memory:"
+        free -h | head -2
+        echo ""
+        echo "Disk Usage:"
+        df -h / | tail -1 | awk '{print "  Root: " $3 " used / " $2 " total (" $5 " used)"}'
+        if [ -d "$wp_root" ]; then
+            du -sh "$wp_root" 2>/dev/null | awk '{print "  WordPress: " $1}'
+        fi
+        echo ""
+        echo "CPU: $(grep -c processor /proc/cpuinfo) cores"
+        echo "Load Average: $(uptime | awk -F'load average:' '{print $2}')"
+        echo '```'
+        echo ""
+    } >> "$temp_file"
+
+    # Section 2: Service Status
+    {
+        echo "## 2. Service Status"
+        echo ""
+        echo "| Service | Status | Notes |"
+        echo "|---------|--------|-------|"
+
+        # Check each service
+        for service in nginx mariadb mysql redis-server fail2ban ufw; do
+            local status="not installed"
+            local notes="-"
+
+            if systemctl list-unit-files "${service}.service" &>/dev/null; then
+                if systemctl is-active --quiet "$service" 2>/dev/null; then
+                    status="✅ running"
+                elif systemctl is-enabled --quiet "$service" 2>/dev/null; then
+                    status="⚠️ stopped (enabled)"
+                else
+                    status="❌ stopped"
+                fi
+            fi
+
+            echo "| $service | $status | $notes |"
+        done
+
+        # PHP-FPM (version-specific)
+        local php_version=$(get_php_version 2>/dev/null || echo "")
+        if [ -n "$php_version" ]; then
+            local php_status="not installed"
+            if systemctl is-active --quiet "php${php_version}-fpm" 2>/dev/null; then
+                php_status="✅ running"
+            else
+                php_status="❌ stopped"
+            fi
+            echo "| php${php_version}-fpm | $php_status | - |"
+        fi
+
+        echo ""
+    } >> "$temp_file"
+
+    # Section 3: PHP Information
+    {
+        echo "## 3. PHP Configuration"
+        echo ""
+        if command -v php &>/dev/null; then
+            echo '```'
+            echo "PHP Version: $(php -v | head -1)"
+            echo ""
+            echo "Key Modules:"
+            php -m 2>/dev/null | grep -iE "mysql|redis|curl|gd|mbstring|xml|zip|imagick|intl|bcmath" | sort | sed 's/^/  - /'
+            echo ""
+            echo "Memory Limit: $(php -i 2>/dev/null | grep "memory_limit" | head -1 | awk '{print $NF}')"
+            echo "Max Execution: $(php -i 2>/dev/null | grep "max_execution_time" | head -1 | awk '{print $NF}')s"
+            echo "Upload Max: $(php -i 2>/dev/null | grep "upload_max_filesize" | head -1 | awk '{print $NF}')"
+            echo '```'
+        else
+            echo "*PHP not found in PATH*"
+        fi
+        echo ""
+    } >> "$temp_file"
+
+    # Section 4: Nginx Configuration
+    {
+        echo "## 4. Nginx Configuration"
+        echo ""
+        echo '```'
+        echo "Nginx Version: $(nginx -v 2>&1 | head -1)"
+        echo ""
+        echo "Sites Enabled:"
+        ls -1 /etc/nginx/sites-enabled/ 2>/dev/null | sed 's/^/  - [SITE_REDACTED] /' || echo "  (none)"
+        echo ""
+        echo "Config Test: $(sudo nginx -t 2>&1 | tail -1)"
+        echo '```'
+        echo ""
+    } >> "$temp_file"
+
+    # Section 5: WordPress Status
+    {
+        echo "## 5. WordPress Status"
+        echo ""
+        if [ -f "$wp_root/wp-config.php" ]; then
+            echo '```'
+            echo "WordPress Root: [WP_ROOT]"
+            echo "wp-config.php: exists"
+
+            # Get WP version if WP-CLI available
+            if command -v wp &>/dev/null; then
+                local wp_ver=$(sudo -u "$wp_user" wp --path="$wp_root" core version 2>/dev/null || echo "unknown")
+                echo "WordPress Version: $wp_ver"
+
+                echo ""
+                echo "Plugins:"
+                sudo -u "$wp_user" wp --path="$wp_root" plugin list --format=csv 2>/dev/null | tail -n +2 | while IFS=, read -r name status update version; do
+                    echo "  - $name ($status, v$version)"
+                done 2>/dev/null || echo "  (unable to list)"
+
+                echo ""
+                echo "Active Theme:"
+                sudo -u "$wp_user" wp --path="$wp_root" theme list --status=active --format=csv 2>/dev/null | tail -n +2 | while IFS=, read -r name status update version; do
+                    echo "  - $name (v$version)"
+                done 2>/dev/null || echo "  (unable to determine)"
+            else
+                echo "WP-CLI: not available"
+            fi
+            echo '```'
+        else
+            echo "*wp-config.php not found at expected location*"
+        fi
+        echo ""
+    } >> "$temp_file"
+
+    # Section 6: State File (Anonymized)
+    {
+        echo "## 6. Configuration State (Anonymized)"
+        echo ""
+        echo '```'
+        if [ -f "$STATE_FILE" ]; then
+            # Read and anonymize state file
+            while IFS='=' read -r key value || [ -n "$key" ]; do
+                # Skip empty lines and comments
+                [[ -z "$key" || "$key" =~ ^# ]] && continue
+
+                # Anonymize sensitive values
+                case "$key" in
+                    *PASS*|*SECRET*|*KEY*|*TOKEN*)
+                        echo "$key=[REDACTED]"
+                        ;;
+                    *EMAIL*)
+                        echo "$key=[EMAIL_REDACTED]"
+                        ;;
+                    DOMAIN|INCLUDE_WWW)
+                        echo "$key=[DOMAIN_REDACTED]"
+                        ;;
+                    *USER*|*OWNER*)
+                        if [[ "$value" =~ ^(www-data|php-fpm|root|wordpress|redis|mysql)$ ]]; then
+                            echo "$key=$value"
+                        else
+                            echo "$key=[USER_REDACTED]"
+                        fi
+                        ;;
+                    DB_NAME)
+                        echo "$key=[DB_NAME_REDACTED]"
+                        ;;
+                    WP_ROOT|BACKUP_*|*_DIR|*_PATH)
+                        # Redact home directory paths
+                        local anon_value=$(echo "$value" | sed 's|/home/[^/]*|/home/[USER]|g')
+                        echo "$key=$anon_value"
+                        ;;
+                    *)
+                        echo "$key=$value"
+                        ;;
+                esac
+            done < "$STATE_FILE"
+        else
+            echo "(state file not found)"
+        fi
+        echo '```'
+        echo ""
+    } >> "$temp_file"
+
+    # Section 7: Permission Audit
+    {
+        echo "## 7. Permission Audit"
+        echo ""
+        echo '```'
+        if [ -d "$wp_root" ]; then
+            echo "WordPress Root:"
+            ls -la "$wp_root" 2>/dev/null | head -5 | tail -4
+
+            echo ""
+            echo "wp-config.php:"
+            ls -la "$wp_root/wp-config.php" 2>/dev/null | awk '{print $1, $3, $4}' || echo "  (not found)"
+
+            echo ""
+            echo "wp-content/uploads:"
+            ls -la "$wp_root/wp-content/" 2>/dev/null | grep uploads | awk '{print $1, $3, $4}' || echo "  (not found)"
+        else
+            echo "(WordPress root not found)"
+        fi
+        echo '```'
+        echo ""
+    } >> "$temp_file"
+
+    # Section 8: Firewall Status
+    {
+        echo "## 8. Firewall Status"
+        echo ""
+        echo '```'
+        if command -v ufw &>/dev/null; then
+            sudo ufw status 2>/dev/null | head -20 | sed 's/[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/[IP_REDACTED]/g'
+        else
+            echo "UFW not installed"
+        fi
+        echo '```'
+        echo ""
+    } >> "$temp_file"
+
+    # Section 9: Recent Logs (Anonymized)
+    {
+        echo "## 9. Recent Log Entries (Anonymized)"
+        echo ""
+
+        # Function to anonymize log content
+        anonymize_log() {
+            sed -E \
+                -e 's/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[IP]/g' \
+                -e 's/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/[EMAIL]/g' \
+                -e 's|https?://[^[:space:]"]+|[URL]|g' \
+                -e "s/$domain/[DOMAIN]/g" 2>/dev/null || cat
+        }
+
+        echo "### Nginx Error Log"
+        echo '```'
+        if [ -f /var/log/nginx/error.log ]; then
+            sudo tail -20 /var/log/nginx/error.log 2>/dev/null | anonymize_log || echo "(unable to read)"
+        else
+            echo "(not found)"
+        fi
+        echo '```'
+        echo ""
+
+        echo "### PHP-FPM Log"
+        echo '```'
+        local php_log="/var/log/php/${php_version}-fpm-${wp_user}_pool-error.log"
+        if [ -f "$php_log" ]; then
+            sudo tail -20 "$php_log" 2>/dev/null | anonymize_log || echo "(unable to read)"
+        else
+            # Try alternative locations
+            local alt_log=$(ls /var/log/php*error*.log 2>/dev/null | head -1)
+            if [ -n "$alt_log" ]; then
+                sudo tail -20 "$alt_log" 2>/dev/null | anonymize_log || echo "(unable to read)"
+            else
+                echo "(not found)"
+            fi
+        fi
+        echo '```'
+        echo ""
+
+        echo "### Fail2Ban Log"
+        echo '```'
+        if [ -f /var/log/fail2ban.log ]; then
+            sudo tail -20 /var/log/fail2ban.log 2>/dev/null | anonymize_log || echo "(unable to read)"
+        else
+            echo "(not found)"
+        fi
+        echo '```'
+        echo ""
+    } >> "$temp_file"
+
+    # Section 10: Quick Health Checks
+    {
+        echo "## 10. Quick Health Checks"
+        echo ""
+        echo "| Check | Result |"
+        echo "|-------|--------|"
+
+        # PHP-FPM socket
+        local php_socket=$(load_state "PHP_FPM_SOCKET" "")
+        if [ -S "$php_socket" ]; then
+            echo "| PHP-FPM Socket | ✅ exists |"
+        else
+            echo "| PHP-FPM Socket | ❌ missing |"
+        fi
+
+        # Nginx config test
+        if sudo nginx -t 2>&1 | grep -q "successful"; then
+            echo "| Nginx Config | ✅ valid |"
+        else
+            echo "| Nginx Config | ❌ invalid |"
+        fi
+
+        # Database connection
+        if command -v mysql &>/dev/null && mysql -e "SELECT 1" &>/dev/null; then
+            echo "| Database | ✅ accessible |"
+        else
+            echo "| Database | ⚠️ check credentials |"
+        fi
+
+        # WordPress files
+        if [ -f "$wp_root/wp-config.php" ] && [ -f "$wp_root/wp-login.php" ]; then
+            echo "| WordPress Files | ✅ present |"
+        else
+            echo "| WordPress Files | ❌ missing |"
+        fi
+
+        # SSL certificate
+        local ssl_type=$(load_state "SSL_TYPE" "none")
+        echo "| SSL Type | $ssl_type |"
+
+        # WAF type
+        local waf_type=$(load_state "WAF_TYPE" "none")
+        echo "| WAF Type | $waf_type |"
+
+        echo ""
+    } >> "$temp_file"
+
+    # Footer
+    {
+        echo "---"
+        echo ""
+        echo "*Report generated by WordPress VPS Management System*"
+        echo "*GitHub: https://github.com/ait88/VPS2*"
+    } >> "$temp_file"
+
+    # Save to output file
+    cp "$temp_file" "$output_file"
+    rm -f "$temp_file"
+
+    # Display report
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    cat "$output_file"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    success "Debug report saved to: $output_file"
+    info "You can copy the above output or attach the file when reporting issues."
+}
+
 debug "Utils module loaded successfully"

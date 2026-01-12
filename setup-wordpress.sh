@@ -616,9 +616,10 @@ show_utils_menu() {
     echo "5) Remove WordPress (Nuke System)"
     echo "6) Test SSH Import Connectivity"
     echo "7) Migrate Cron Jobs from Remote Server"
-    echo "8) Back to Main Menu"
+    echo "8) Generate Debug Report (for troubleshooting)"
+    echo "9) Back to Main Menu"
     echo
-    read -p "Enter your choice [1-7]: " choice
+    read -p "Enter your choice [1-9]: " choice
     echo
 
     case $choice in
@@ -629,7 +630,8 @@ show_utils_menu() {
         5) nuke_all ;;
         6) test_ssh_import && show_utils_menu ;;
         7) migrate_cron_jobs && show_utils_menu ;;
-        8) show_menu ;;
+        8) run_debug_report ;;
+        9) show_menu ;;
         *)
             error "Invalid choice: $choice"
             show_utils_menu
@@ -1024,6 +1026,50 @@ fix_permissions() {
     else
         error "Failed to apply permissions"
     fi
+
+    echo
+    echo "Press Enter to continue..."
+    read
+    show_utils_menu
+}
+
+run_debug_report() {
+    info "=== Generate Debug Report ==="
+    echo
+
+    # Load required modules
+    for module in utils.sh; do
+        load_module "$module"
+    done
+
+    echo "This will generate an anonymized debug report containing:"
+    echo "• System information (OS, memory, disk, CPU)"
+    echo "• Service status (nginx, PHP-FPM, MariaDB, Redis, Fail2ban)"
+    echo "• PHP configuration and modules"
+    echo "• WordPress status and plugins"
+    echo "• Anonymized state file contents"
+    echo "• Permission audit"
+    echo "• Recent log entries (anonymized)"
+    echo
+    echo "All sensitive data (domains, IPs, emails, passwords) will be redacted."
+    echo
+
+    if ! command -v confirm &>/dev/null; then
+        echo -n "Generate debug report? [Y/n]: "
+        read -r response
+        if [[ "$response" =~ ^[Nn]$ ]]; then
+            echo "Operation cancelled."
+            show_utils_menu
+            return
+        fi
+    else
+        if ! confirm "Generate debug report?" Y; then
+            show_utils_menu
+            return
+        fi
+    fi
+
+    generate_debug_report
 
     echo
     echo "Press Enter to continue..."
