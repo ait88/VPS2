@@ -191,8 +191,13 @@ configure_waf_settings() {
 }
 
 setup_cloudflare_real_ip() {
+    # Implements: feat(nginx): Add Cloudflare real IP detection (#7)
+    # Configures nginx to extract real visitor IPs from CF-Connecting-IP header
+    # when behind Cloudflare proxy. Dynamically fetches current Cloudflare IP ranges
+    # and sets up weekly auto-updates to maintain accuracy.
+
     info "Fetching Cloudflare IP ranges..."
-    
+
     local cf_conf="/etc/nginx/conf.d/cloudflare-real-ip.conf"
     
     # Download current Cloudflare IPs
