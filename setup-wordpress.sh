@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ===== CONFIGURATION =====
-SCRIPT_VERSION="3.1.5"
+SCRIPT_VERSION="3.1.6"
 SCRIPT_URL="https://raw.githubusercontent.com/ait88/VPS2/main/setup-wordpress.sh"
 BASE_URL="https://raw.githubusercontent.com/ait88/VPS2/main/wordpress-mgmt"
 
@@ -191,7 +191,11 @@ force_update() {
     echo "  • All library modules in wordpress-mgmt/lib/"
     echo
 
-    if ! confirm "Proceed with force update?" Y; then
+    # Inline confirmation (confirm function not available - modules not loaded yet)
+    echo -ne "\033[1;33mProceed with force update? [Y/n]: \033[0m" >&2
+    read -r response </dev/tty
+    response=${response:-Y}
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
         info "Update cancelled"
         return 0
     fi
