@@ -13,6 +13,8 @@ install_wordpress() {
             if ! state_exists "SYSTEM_CRON_CONFIGURED"; then
                 setup_system_cron
             fi
+            # Always enforce permissions on existing installations
+            ensure_wordpress_permissions
             return 0
         else
             warning "WordPress marked as installed but verification failed - reinstalling"
@@ -2060,6 +2062,7 @@ complete_wordpress_setup() {
 }
 
 # Ensure consistent WordPress permissions after installation
+# This function aligns with enforce_standard_permissions() in utils.sh
 ensure_wordpress_permissions() {
     local wp_root=$(load_state "WP_ROOT")
     local wp_user=$(load_state "WP_USER")
@@ -2068,6 +2071,15 @@ ensure_wordpress_permissions() {
 
     # Set consistent ownership - all files use wordpress group
     sudo chown -R "$wp_user:wordpress" "$wp_root"
+
+    # Base permissions: 644 for files, 755 for directories
+    sudo find "$wp_root" -type f -exec chmod 644 {} \;
+    sudo find "$wp_root" -type d -exec chmod 755 {} \;
+
+    # Secure wp-config.php (640 = owner read/write, group read, no other)
+    if [ -f "$wp_root/wp-config.php" ]; then
+        sudo chmod 640 "$wp_root/wp-config.php"
+    fi
 
     # Create necessary directories with correct permissions if they don't exist
     sudo mkdir -p "$wp_root"/{tmp,logs,backups}
@@ -2078,7 +2090,7 @@ ensure_wordpress_permissions() {
     sudo chmod 2770 "$wp_root/tmp"
 
     # Ensure writable directories have correct ownership for PHP-FPM
-    local writable_dirs=("wp-content/uploads" "wp-content/cache" "wp-content/upgrade")
+    local writable_dirs=("wp-content/uploads" "wp-content/cache" "wp-content/upgrade" "wp-content/wflogs")
     for dir in "${writable_dirs[@]}"; do
         if [ -d "$wp_root/$dir" ]; then
             sudo chown php-fpm:wordpress "$wp_root/$dir"
