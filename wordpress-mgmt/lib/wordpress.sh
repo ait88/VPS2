@@ -2065,16 +2065,24 @@ complete_wordpress_setup() {
 
 # Ensure consistent WordPress permissions after installation
 # This function aligns with enforce_standard_permissions() in utils.sh
+# Uses ACLs to give php-fpm write access while keeping wpuser ownership
 ensure_wordpress_permissions() {
     local wp_root=$(load_state "WP_ROOT")
     local wp_user=$(load_state "WP_USER")
+    local php_user=$(load_state "PHP_USER" "php-fpm")
 
-    info "Enforcing standardized WordPress permissions..."
+    info "Enforcing standardized WordPress permissions with ACLs..."
 
-    # Set consistent ownership - all files use wordpress group
+    # Ensure ACL package is installed
+    if ! command -v setfacl &>/dev/null; then
+        info "Installing ACL package..."
+        sudo apt-get install -y acl >/dev/null 2>&1
+    fi
+
+    # Set consistent ownership - all files owned by wpuser:wordpress
     sudo chown -R "$wp_user:wordpress" "$wp_root"
 
-    # Base permissions: 644 for files, 755 for directories
+    # Base permissions: 644 for files, 755 for directories (secure defaults)
     sudo find "$wp_root" -type f -exec chmod 644 {} \;
     sudo find "$wp_root" -type d -exec chmod 755 {} \;
 
@@ -2087,12 +2095,23 @@ ensure_wordpress_permissions() {
     sudo mkdir -p "$wp_root"/{tmp,logs,backups}
     sudo chown "$wp_user:wordpress" "$wp_root"/{tmp,logs,backups}
 
-    # Set proper permissions for backup/log directories
+    # Set proper permissions for backup/log directories (restricted)
     sudo chmod 2750 "$wp_root"/{logs,backups}
     sudo chmod 2770 "$wp_root/tmp"
 
-    # Ensure writable directories have correct ownership for PHP-FPM
-    # These directories need PHP-FPM write access for WordPress functionality
+    # Apply ACLs to give php-fpm write access without changing ownership
+    info "Applying ACLs for PHP-FPM write access..."
+
+    # Remove existing ACLs first (clean slate)
+    sudo setfacl -R -b "$wp_root" 2>/dev/null || true
+
+    # Set ACL: php-fpm gets read/write on files, read/write/execute on directories
+    sudo setfacl -R -m u:${php_user}:rwX "$wp_root"
+
+    # Set default ACL so new files/dirs inherit php-fpm access
+    sudo setfacl -R -d -m u:${php_user}:rwX "$wp_root"
+
+    # Ensure wp-content subdirectories exist
     local writable_dirs=(
         "wp-content/plugins"
         "wp-content/themes"
@@ -2105,21 +2124,24 @@ ensure_wordpress_permissions() {
         "wp-content/wflogs"
     )
 
-    # Create directories if they don't exist, then set permissions
     for dir in "${writable_dirs[@]}"; do
         if [ ! -d "$wp_root/$dir" ]; then
             sudo mkdir -p "$wp_root/$dir"
+            sudo chown "$wp_user:wordpress" "$wp_root/$dir"
         fi
-        # Set directory permissions
-        sudo chown php-fpm:wordpress "$wp_root/$dir"
-        sudo chmod 2775 "$wp_root/$dir"
-        # Set recursive ownership and permissions on contents (for existing files)
-        sudo chown -R php-fpm:wordpress "$wp_root/$dir"
-        sudo find "$wp_root/$dir" -type f -exec chmod 664 {} \; 2>/dev/null || true
-        sudo find "$wp_root/$dir" -type d -exec chmod 2775 {} \; 2>/dev/null || true
+        # Ensure setgid on directories for consistent group ownership
+        sudo chmod g+s "$wp_root/$dir"
     done
 
-    debug "WordPress permissions standardized"
+    # Remove php-fpm ACL from restricted directories
+    for dir in logs backups; do
+        if [ -d "$wp_root/$dir" ]; then
+            sudo setfacl -R -x u:${php_user} "$wp_root/$dir" 2>/dev/null || true
+            sudo setfacl -R -d -x u:${php_user} "$wp_root/$dir" 2>/dev/null || true
+        fi
+    done
+
+    debug "WordPress permissions with ACLs standardized"
 }
 
 # Setup system cron to replace WP-Cron for reliable scheduled tasks
