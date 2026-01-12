@@ -1051,7 +1051,7 @@ fix_permissions() {
     echo
 
     # Load required modules
-    for module in utils.sh; do
+    for module in utils.sh nginx.sh; do
         load_module "$module"
     done
 
@@ -1061,6 +1061,16 @@ fix_permissions() {
     echo "• Writable dirs: php-fpm:wordpress with setgid (2775)"
     echo "• Backup/log dirs: restricted access (2750)"
     echo "• Sensitive config: wp-config.php (640)"
+
+    # Check if Cloudflare config is needed
+    local waf_type=$(load_state "WAF_TYPE" "none")
+    if [ "$waf_type" = "cloudflare" ] || [ "$waf_type" = "cloudflare_ent" ]; then
+        if [ ! -f "/etc/nginx/conf.d/cloudflare-real-ip.conf" ]; then
+            echo "• Cloudflare real IP config (missing - will be created)"
+        else
+            echo "• Cloudflare real IP config (already exists)"
+        fi
+    fi
     echo
 
     if ! command -v confirm &>/dev/null; then
@@ -1082,6 +1092,24 @@ fix_permissions() {
         success "✓ Standard permissions applied successfully"
     else
         error "Failed to apply permissions"
+    fi
+
+    # Fix for #37: Ensure Cloudflare real IP config exists for fail2ban
+    if [ "$waf_type" = "cloudflare" ] || [ "$waf_type" = "cloudflare_ent" ]; then
+        if [ ! -f "/etc/nginx/conf.d/cloudflare-real-ip.conf" ]; then
+            info "Creating Cloudflare real IP config for fail2ban compatibility..."
+            if type setup_cloudflare_real_ip &>/dev/null; then
+                setup_cloudflare_real_ip
+                if sudo nginx -t 2>/dev/null; then
+                    restart_service "nginx"
+                    success "✓ Cloudflare real IP config created"
+                else
+                    warning "nginx config test failed - please check manually"
+                fi
+            else
+                warning "Could not create Cloudflare real IP config - nginx.sh not loaded"
+            fi
+        fi
     fi
 
     echo
