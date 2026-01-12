@@ -190,20 +190,22 @@ configure_ufw() {
         local waf_ips=$(load_state "WAF_IPS")
         
         if [ "$waf_type" = "cloudflare" ] || [ "$waf_type" = "cloudflare_ent" ]; then
-            # Fetch and allow Cloudflare IPs ONLY
+            # Implements: feat(security): Configure UFW to only allow Cloudflare IPs (#9)
+            # Fetch and allow Cloudflare IPs ONLY - defense in depth with nginx restrictions
             info "Adding Cloudflare IP ranges to firewall..."
-            
-            # IPv4
+
+            # IPv4 ranges from official Cloudflare API
             curl -s https://www.cloudflare.com/ips-v4 | while read ip; do
-                sudo ufw allow from "$ip" to any port 80,443 proto tcp comment "Cloudflare"
+                [ -n "$ip" ] && sudo ufw allow from "$ip" to any port 80,443 proto tcp comment "Cloudflare IPv4"
             done
-            
-            # IPv6  
+
+            # IPv6 ranges from official Cloudflare API
             curl -s https://www.cloudflare.com/ips-v6 | while read ip; do
-                sudo ufw allow from "$ip" to any port 80,443 proto tcp comment "Cloudflare"
+                [ -n "$ip" ] && sudo ufw allow from "$ip" to any port 80,443 proto tcp comment "Cloudflare IPv6"
             done
-            
-            info "✓ WAF protection enabled - only Cloudflare IPs allowed"
+
+            save_state "UFW_CLOUDFLARE_CONFIGURED" "true"
+            success "✓ UFW Cloudflare-only protection enabled"
         else
             # Custom WAF IPs
             for ip in $waf_ips; do
