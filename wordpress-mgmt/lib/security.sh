@@ -34,8 +34,28 @@ apply_security() {
 }
 
 setup_fail2ban() {
+    # Implements: feat(security): Configure Fail2Ban to use real visitor IPs behind Cloudflare (#10)
+    # Fail2Ban reads nginx logs. When behind Cloudflare, nginx must extract real IPs via
+    # CF-Connecting-IP header. Without this, Fail2Ban would ban Cloudflare IPs (breaking everything).
+
     info "Configuring Fail2ban for WordPress..."
-    
+
+    local waf_type=$(load_state "WAF_TYPE" "none")
+
+    # Verify real IP logging is working when behind Cloudflare
+    if [ "$waf_type" = "cloudflare" ] || [ "$waf_type" = "cloudflare_ent" ]; then
+        info "Cloudflare detected - verifying real IP logging..."
+
+        if [ -f "/etc/nginx/conf.d/cloudflare-real-ip.conf" ]; then
+            success "✓ Cloudflare real IP config found - Fail2Ban will see real visitor IPs"
+        else
+            warning "Cloudflare real IP config not found at /etc/nginx/conf.d/cloudflare-real-ip.conf"
+            warning "Fail2Ban may ban Cloudflare IPs instead of attackers!"
+            warning "Run nginx Cloudflare configuration first (setup_cloudflare_real_ip)"
+            warning "Continuing with Fail2Ban setup, but banning may not work correctly"
+        fi
+    fi
+
     # Create WordPress filter
     sudo tee /etc/fail2ban/filter.d/wordpress.conf >/dev/null <<'EOF'
 [Definition]
@@ -121,6 +141,9 @@ EOF
     
     # Restart fail2ban
     restart_service "fail2ban"
+
+    save_state "FAIL2BAN_CONFIGURED" "true"
+    success "✓ Fail2Ban configured for WordPress protection"
 }
 
 configure_ufw() {
