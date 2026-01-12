@@ -686,7 +686,17 @@ EOF
     
     # Add rate limiting to main nginx.conf if not exists
     if ! grep -q "limit_req_zone.*wordpress_login" /etc/nginx/nginx.conf; then
-        sudo sed -i '/http {/a \    # WordPress rate limiting\n    limit_req_zone $binary_remote_addr zone=wordpress_login:10m rate=5r/m;\n    limit_req_zone $binary_remote_addr zone=wordpress_api:10m rate=30r/m;\n' /etc/nginx/nginx.conf
+        local waf_type=$(load_state "WAF_TYPE" "none")
+        local rate_limit_var='$binary_remote_addr'
+
+        # Use realip_remote_addr when behind WAF to rate limit by real visitor IP
+        if [ "$waf_type" != "none" ]; then
+            rate_limit_var='$realip_remote_addr'
+            info "Using real IP address for rate limiting (WAF detected)"
+        fi
+
+        sudo sed -i '/http {/a \    # WordPress rate limiting (returns 429 when exceeded)\n    limit_req_status 429;\n    limit_req_zone '"$rate_limit_var"' zone=wordpress_login:10m rate=5r/m;\n    limit_req_zone '"$rate_limit_var"' zone=wordpress_api:10m rate=30r/m;\n' /etc/nginx/nginx.conf
+        save_state "RATE_LIMITING_CONFIGURED" "true"
     fi
 }
 
